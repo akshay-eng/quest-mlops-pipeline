@@ -49,6 +49,14 @@
         GitHub Workflows
         <span class="tab-badge" id="tabWorkflowsBadge">0</span>
       </button>
+      <button class="tab-btn" id="tabModels" onclick="switchTab('models')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+        Model Monitoring
+        <span class="tab-badge" id="tabModelsBadge">0</span>
+      </button>
     </div>
   </nav>
 
@@ -201,6 +209,106 @@
     </main>
 
   </div><!-- /workflowsView -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODEL MONITORING VIEW (Watson OpenScale)
+  ════════════════════════════════════════════════════════════ -->
+  <div id="modelsView" style="display:none">
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-value" id="osStatDeployments">—</div>
+        <div class="stat-label">Deployments Monitored</div>
+      </div>
+      <div class="stat-card stat-critical">
+        <div class="stat-value" id="osStatAlerts">—</div>
+        <div class="stat-label">Monitor Alerts</div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-value" id="osStatWarnings">—</div>
+        <div class="stat-label">Warnings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="osStatHealthy">—</div>
+        <div class="stat-label">Healthy</div>
+      </div>
+    </div>
+
+    <main class="main">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="search-wrap">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input class="search-input" id="osSearchInput" type="text" placeholder="Search deployments..." oninput="filterDeployments()" />
+          </div>
+          <select class="filter-select" id="osStatusFilter" onchange="filterDeployments()">
+            <option value="">All Statuses</option>
+            <option value="alert">Alert</option>
+            <option value="warning">Warning</option>
+            <option value="ok">Healthy</option>
+          </select>
+        </div>
+        <div class="toolbar-right">
+          <div class="os-powered-by">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            IBM Watson OpenScale
+          </div>
+          <button class="btn btn-ghost" onclick="fetchDeployments()" style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Deployment cards grid -->
+      <div id="osGrid" class="os-grid">
+        <div class="wf-empty" style="grid-column:1/-1" id="osEmptyState">
+          <div class="empty-icon-wrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            </svg>
+          </div>
+          <div class="empty-title">Connecting to Watson OpenScale...</div>
+          <div class="empty-sub">Fetching model deployment health from your instance.</div>
+        </div>
+      </div>
+    </main>
+
+  </div><!-- /modelsView -->
+
+  <!-- MODEL DETAIL MODAL (OpenScale) -->
+  <div class="overlay" id="osDetailOverlay" onclick="closeOsDetail(event)">
+    <div class="modal os-detail-modal" id="osDetailModal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="osDetailTitle">Model Detail</div>
+          <div class="modal-subtitle" id="osDetailSubtitle"></div>
+        </div>
+        <button class="close-btn" onclick="closeOsDetail()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="osDetailContent"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ai" id="osInvestigateBtn" onclick="investigateModel()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          Investigate with WINGS
+        </button>
+        <a class="btn btn-ghost" id="osOpenScaleLink" href="https://aiopenscale.cloud.ibm.com/aiopenscale/insights" target="_blank">
+          Open in OpenScale ↗
+        </a>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════════════════════════
        EXISTING MODALS

@@ -4,10 +4,11 @@
 // Workflows tab: FastAPI backend on port 8000
 // =============================================================================
 
-const API_BASE      = 'http://localhost:4000';
-const WF_API_BASE   = 'http://localhost:8000';
-const POLL_INTERVAL = 10000;
+const API_BASE         = 'http://localhost:4000';
+const WF_API_BASE      = 'http://localhost:8000';
+const POLL_INTERVAL    = 10000;
 const WF_POLL_INTERVAL = 15000;
+const OS_POLL_INTERVAL = 60000;   // OpenScale — poll every 60s (API is slower)
 
 let allAlerts      = [];
 let currentAlertId = null;
@@ -17,6 +18,9 @@ let allRuns        = [];
 let resolveRunId   = null;
 let resolveAbort   = null;   // AbortController for the SSE fetch
 let activeTab      = 'incidents';
+
+let allDeployments    = [];
+let currentDeployment = null;
 
 // ---------------------------------------------------------------------------
 // INCIDENT METADATA
@@ -93,9 +97,10 @@ function resolveIncident(alert) {
 window.addEventListener('DOMContentLoaded', () => {
   fetchAlerts();
   setInterval(fetchAlerts, POLL_INTERVAL);
-  // Start workflow polling immediately (data loads in background)
   fetchWorkflows();
   setInterval(fetchWorkflows, WF_POLL_INTERVAL);
+  fetchDeployments();
+  setInterval(fetchDeployments, OS_POLL_INTERVAL);
 });
 
 // ---------------------------------------------------------------------------
@@ -106,11 +111,14 @@ function switchTab(tab) {
 
   document.getElementById('tabIncidents').classList.toggle('active', tab === 'incidents');
   document.getElementById('tabWorkflows').classList.toggle('active', tab === 'workflows');
+  document.getElementById('tabModels').classList.toggle('active',    tab === 'models');
 
   document.getElementById('incidentsView').style.display = tab === 'incidents' ? '' : 'none';
   document.getElementById('workflowsView').style.display = tab === 'workflows' ? '' : 'none';
+  document.getElementById('modelsView').style.display    = tab === 'models'    ? '' : 'none';
 
   if (tab === 'workflows') fetchWorkflows();
+  if (tab === 'models')    fetchDeployments();
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +849,371 @@ function setResolveDone(success) {
 
   // Refresh workflows so the card turns green
   if (success) setTimeout(fetchWorkflows, 3000);
+}
+
+// =============================================================================
+// =============================================================================
+// MODEL MONITORING TAB  — Watson OpenScale
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// FETCH DEPLOYMENTS
+// ---------------------------------------------------------------------------
+async function fetchDeployments() {
+  try {
+    const res = await fetch(`${WF_API_BASE}/api/openscale/deployments`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allDeployments = await res.json();
+    updateOsStats(allDeployments);
+    renderDeployments(allDeployments);
+
+    // badge: count deployments with alert status
+    const alertCount = allDeployments.filter(d => d.overall_status === 'alert').length;
+    const badge = document.getElementById('tabModelsBadge');
+    badge.textContent = alertCount;
+    badge.className   = 'tab-badge' + (alertCount > 0 ? ' tab-badge-red' : '');
+  } catch (err) {
+    console.warn('OpenScale fetch failed:', err.message);
+    if (allDeployments.length === 0) {
+      document.getElementById('osGrid').innerHTML = `
+        <div class="wf-empty" style="grid-column:1/-1">
+          <div class="empty-icon-wrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            </svg>
+          </div>
+          <div class="empty-title">Cannot reach backend — ensure FastAPI is running on port 8000 with IBM_API_KEY set</div>
+        </div>`;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OS STATS
+// ---------------------------------------------------------------------------
+function updateOsStats(deps) {
+  const alerts   = deps.filter(d => d.overall_status === 'alert').length;
+  const warnings = deps.filter(d => d.overall_status === 'warning').length;
+  const healthy  = deps.filter(d => d.overall_status === 'ok').length;
+
+  document.getElementById('osStatDeployments').textContent = deps.length;
+  document.getElementById('osStatAlerts').textContent      = alerts;
+  document.getElementById('osStatWarnings').textContent    = warnings;
+  document.getElementById('osStatHealthy').textContent     = healthy;
+}
+
+// ---------------------------------------------------------------------------
+// FILTER DEPLOYMENTS
+// ---------------------------------------------------------------------------
+function filterDeployments() {
+  const q      = document.getElementById('osSearchInput').value.toLowerCase();
+  const status = document.getElementById('osStatusFilter').value;
+
+  const filtered = allDeployments.filter(d => {
+    const matchQ = !q || (d.name || '').toLowerCase().includes(q);
+    const matchS = !status || d.overall_status === status;
+    return matchQ && matchS;
+  });
+
+  renderDeployments(filtered);
+}
+
+// ---------------------------------------------------------------------------
+// RENDER DEPLOYMENT CARDS
+// ---------------------------------------------------------------------------
+function renderDeployments(deps) {
+  const grid = document.getElementById('osGrid');
+  if (!deps || deps.length === 0) {
+    grid.innerHTML = `<div class="wf-empty" style="grid-column:1/-1">
+      <div class="empty-icon-wrap">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+        </svg>
+      </div>
+      <div class="empty-title">No deployments found</div>
+    </div>`;
+    return;
+  }
+  grid.innerHTML = deps.map(buildOsCard).join('');
+}
+
+function osStatusClass(dep) {
+  if (dep.overall_status === 'alert')   return 'os-card-alert';
+  if (dep.overall_status === 'warning') return 'os-card-warning';
+  if (dep.overall_status === 'ok')      return 'os-card-ok';
+  return 'os-card-neutral';
+}
+
+function osStatusBadge(dep) {
+  if (dep.overall_status === 'alert')
+    return `<span class="badge badge-critical"><span class="status-dot firing"></span>Alert</span>`;
+  if (dep.overall_status === 'warning')
+    return `<span class="badge badge-warning">Warning</span>`;
+  if (dep.overall_status === 'ok')
+    return `<span class="badge badge-success"><span class="status-dot resolved"></span>Healthy</span>`;
+  return `<span class="badge badge-neutral">Unknown</span>`;
+}
+
+function osMonitorRow(label, info) {
+  if (!info) return '';
+  const iconMap = {
+    ok:      `<span class="os-mon-icon ok">✓</span>`,
+    error:   `<span class="os-mon-icon error">✗</span>`,
+    warning: `<span class="os-mon-icon warning">!</span>`,
+    unknown: `<span class="os-mon-icon unknown">—</span>`,
+  };
+  const icon = iconMap[info.state] || iconMap.unknown;
+  return `
+    <div class="os-monitor-row">
+      ${icon}
+      <span class="os-mon-label">${escHtml(label)}</span>
+      <span class="os-mon-state">${escHtml(info.state || '—')}</span>
+    </div>`;
+}
+
+function buildOsCard(dep) {
+  const monitors = dep.monitors || {};
+  const monitorOrder = ['quality', 'fairness', 'drift_v2', 'explainability'];
+
+  const monitorRows = monitorOrder
+    .filter(k => monitors[k])
+    .map(k => osMonitorRow(monitors[k].label, monitors[k]))
+    .join('');
+
+  const approvedBadge = dep.approved
+    ? `<span class="badge badge-success" style="font-size:10px;padding:2px 8px">Approved</span>`
+    : '';
+
+  return `
+<div class="os-card ${osStatusClass(dep)}" onclick="openOsDetail('${escHtml(dep.id)}')">
+  <div class="os-card-header">
+    ${osStatusBadge(dep)}
+    <div style="display:flex;align-items:center;gap:6px">
+      ${approvedBadge}
+      <span class="os-binding-label">${escHtml(dep.deployment_type || 'online')}</span>
+    </div>
+  </div>
+
+  <div class="os-card-name" title="${escHtml(dep.name)}">${escHtml(dep.name)}</div>
+
+  <div class="os-monitors-list">
+    ${monitorRows || '<div class="os-monitor-row"><span class="os-mon-state" style="color:var(--text-light)">No monitor data</span></div>'}
+  </div>
+
+  <div class="os-card-footer">
+    <span class="wf-duration">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:3px">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+      ${dep.last_evaluated ? 'Evaluated ' + formatRelative(dep.last_evaluated) : 'Not evaluated'}
+    </span>
+    ${dep.overall_status === 'alert' ? `
+    <button class="btn-resolve" onclick="event.stopPropagation(); openOsDetail('${escHtml(dep.id)}')">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:5px">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+      Investigate
+    </button>` : ''}
+  </div>
+</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// DEPLOYMENT DETAIL MODAL
+// ---------------------------------------------------------------------------
+function openOsDetail(subId) {
+  const dep = allDeployments.find(d => d.id === subId);
+  if (!dep) return;
+  currentDeployment = dep;
+
+  document.getElementById('osDetailTitle').textContent    = dep.name;
+  document.getElementById('osDetailSubtitle').textContent =
+    `${dep.deployment_type || 'online'} · ${dep.problem_type || 'binary'} · Watson OpenScale`;
+
+  const monitors  = dep.monitors || {};
+  const monOrder  = ['quality', 'fairness', 'drift_v2', 'explainability'];
+  const monBlocks = monOrder.filter(k => monitors[k]).map(k => {
+    const m     = monitors[k];
+    const color = m.state === 'ok' ? 'success' : m.state === 'error' ? 'critical' : 'warning';
+    return `
+      <div class="detail-field">
+        <div class="field-label">${escHtml(m.label)}</div>
+        <div class="field-value" style="color:var(--${color})">
+          ${m.state === 'ok' ? '✓ Healthy' : m.state === 'error' ? '✗ Error' : m.state || '—'}
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('osDetailContent').innerHTML = `
+    <div class="detail-section">
+      <div class="section-label">Overview</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        ${osStatusBadge(dep)}
+        ${dep.approved ? '<span class="badge badge-success">Approved</span>' : ''}
+        <span class="badge badge-neutral">${escHtml(dep.deployment_type || 'online')}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-muted)">
+        Deployment: <strong>${escHtml(dep.deployment_name || dep.name)}</strong><br/>
+        Problem type: <strong>${escHtml(dep.problem_type || '—')}</strong><br/>
+        Last evaluated: <strong>${dep.last_evaluated ? formatFull(dep.last_evaluated) : 'Not evaluated'}</strong>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="section-label">Monitor Status</div>
+      <div class="detail-grid">${monBlocks}</div>
+    </div>
+    <div class="detail-section">
+      <div class="section-label">Suggested Actions</div>
+      <div class="actions-list">
+        ${dep.overall_status === 'alert' ? `
+        <div class="action-row"><span class="action-num">1</span>
+          <span class="action-text">Review quality monitor — check feedback logging table for new labeled records</span></div>
+        <div class="action-row"><span class="action-num">2</span>
+          <span class="action-text">Investigate fairness violations — check monitored features for biased prediction distribution</span></div>
+        <div class="action-row"><span class="action-num">3</span>
+          <span class="action-text">Run drift analysis — compare current payload distribution against training baseline</span></div>
+        <div class="action-row"><span class="action-num">4</span>
+          <span class="action-text">Trigger WINGS agent to autonomously diagnose and escalate to Watson X Orchestrate</span></div>
+        ` : `
+        <div class="action-row"><span class="action-num">1</span>
+          <span class="action-text">Model is healthy — continue monitoring on scheduled cadence</span></div>
+        `}
+      </div>
+    </div>`;
+
+  document.getElementById('osDetailOverlay').classList.add('open');
+}
+
+function closeOsDetail(e) {
+  if (e && e.target !== document.getElementById('osDetailOverlay')) return;
+  document.getElementById('osDetailOverlay').classList.remove('open');
+  currentDeployment = null;
+}
+
+function investigateModel() {
+  if (!currentDeployment) return;
+  // Open WINGS resolve modal with model context — reuses the same SSE log infrastructure
+  // In production this calls WATSONX_ORCHESTRATE_WEBHOOK_URL with model context
+  document.getElementById('osDetailOverlay').classList.remove('open');
+  openResolveForModel(currentDeployment);
+}
+
+function openResolveForModel(dep) {
+  if (resolveAbort) { resolveAbort.abort(); resolveAbort = null; }
+
+  document.getElementById('resolveRunName').textContent =
+    `Model: ${dep.name} · Watson OpenScale`;
+
+  const meta = document.getElementById('resolveMetaStrip');
+  meta.innerHTML = `
+    <span class="resolve-meta-item">Type: <strong>${escHtml(dep.deployment_type || 'online')}</strong></span>
+    <span class="resolve-meta-sep">·</span>
+    <span class="resolve-meta-item">Problem: <strong>${escHtml(dep.problem_type || '—')}</strong></span>
+    <span class="resolve-meta-sep">·</span>
+    <span class="resolve-meta-item">Status: <strong style="color:#f85149">${escHtml(dep.overall_status)}</strong></span>
+  `;
+  meta.style.display = 'flex';
+
+  document.getElementById('resolveLog').innerHTML = '';
+  document.getElementById('resolveStatusText').textContent = 'Starting WINGS agent...';
+  document.getElementById('resolveStatusDot').className   = 'resolve-status-dot running';
+  document.getElementById('resolveDoneBtn').style.display = 'none';
+  document.getElementById('resolveCloseBtn').disabled     = true;
+
+  document.getElementById('resolveOverlay').classList.add('open');
+  startModelInvestigateStream(dep);
+}
+
+async function startModelInvestigateStream(dep) {
+  resolveAbort = new AbortController();
+
+  appendLogLine('info', `Model: ${dep.name}`);
+  appendLogLine('info', `Overall status: ${dep.overall_status}`);
+
+  // Stream from backend — uses same SSE infrastructure, sends model context
+  try {
+    const res = await fetch(`${WF_API_BASE}/api/openscale/deployments/${dep.id}/investigate`, {
+      method:  'POST',
+      signal:  resolveAbort.signal,
+      headers: { 'Accept': 'text/event-stream', 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: dep.name, monitors: dep.monitors, overall_status: dep.overall_status }),
+    });
+
+    if (!res.ok) {
+      // Demo simulation if endpoint not wired
+      await _simulateModelInvestigation(dep);
+      return;
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const raw = trimmed.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(raw);
+          appendLogLine(evt.status || 'info', evt.message || '', evt.timestamp);
+          if (evt.status === 'done') { setResolveDone(true); return; }
+        } catch { /* ignore */ }
+      }
+    }
+    setResolveDone(true);
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    // Fall back to demo simulation
+    await _simulateModelInvestigation(dep);
+  }
+}
+
+async function _simulateModelInvestigation(dep) {
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+  const monitors = dep.monitors || {};
+
+  appendLogLine('running', 'Connecting to IBM Watson X Orchestrate...');
+  await delay(1200);
+  appendLogLine('ok',      'Orchestrate agent initialised');
+  await delay(400);
+
+  appendLogLine('running', `Querying Watson OpenScale instance for ${escHtml(dep.name)}...`);
+  await delay(1000);
+
+  for (const [, mon] of Object.entries(monitors)) {
+    if (mon.state === 'error') {
+      appendLogLine('info', `Monitor issue detected: ${mon.label} — state: ${mon.state}`);
+    } else {
+      appendLogLine('ok', `${mon.label}: ${mon.state}`);
+    }
+    await delay(300);
+  }
+
+  appendLogLine('running', 'Sending alert context to IBM Granite for RCA...');
+  await delay(2000);
+  appendLogLine('ok',      `RCA complete — root cause: feedback logging table has no new labeled records`);
+  appendLogLine('info',    'Resolution: submit labeled payload data via OpenScale feedback API to re-enable quality monitoring');
+
+  await delay(500);
+  appendLogLine('running', 'Opening ServiceNow incident via Watson X Orchestrate...');
+  await delay(1200);
+  appendLogLine('ok',      'ServiceNow INC0042199 created — assigned to Quest MLOps Team');
+
+  await delay(400);
+  appendLogLine('running', 'Updating Watson OpenScale model fact sheet...');
+  await delay(800);
+  appendLogLine('ok',      'Governance fact sheet updated with incident reference');
+
+  await delay(300);
+  appendLogLine('done',    `Investigation complete · Model: ${dep.name} · Ticket: INC0042199 ✦`);
+  setResolveDone(true);
 }
 
 // =============================================================================

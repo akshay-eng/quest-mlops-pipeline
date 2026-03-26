@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import webhook, workflows, resolve
+from routes import webhook, workflows, resolve, openscale
 
 app = FastAPI(title="WINGS Backend", version="1.0.0")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 app.include_router(webhook.router,   prefix="/webhook", tags=["Webhooks"])
 app.include_router(workflows.router, prefix="/api",     tags=["Workflows"])
 app.include_router(resolve.router,   prefix="/api",     tags=["Resolve"])
+app.include_router(openscale.router, prefix="/api",     tags=["OpenScale"])
 
 @app.get("/health")
 def health():
