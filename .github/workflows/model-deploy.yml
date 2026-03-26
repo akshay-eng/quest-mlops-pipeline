@@ -1,0 +1,65 @@
+name: Quest MLOps — Model Deployment
+
+on:
+  workflow_run:
+    workflows: ["Quest MLOps — Model Training Pipeline"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: drug-test-classifier
+          path: model/
+        continue-on-error: true
+
+      - name: Build serving image
+        run: |
+          docker build \
+            -f serving/Dockerfile \
+            -t quest-drug-classifier:${{ github.sha }} \
+            -t quest-drug-classifier:latest \
+            .
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > ~/.kube/config
+          kubectl config current-context
+
+      - name: Deploy to K8s
+        run: |
+          kubectl set image deployment/quest-model-server \
+            quest-model-server=quest-drug-classifier:${{ github.sha }} \
+            -n quest-diagnostics
+          kubectl rollout status deployment/quest-model-server \
+            -n quest-diagnostics --timeout=120s
+
+      - name: Smoke test
+        run: |
+          sleep 10
+          curl -sf http://${{ secrets.MODEL_ENDPOINT }}/health
+          curl -sf -X POST http://${{ secrets.MODEL_ENDPOINT }}/predict \
+            -H "Content-Type: application/json" \
+            -d '{"age":35,"test_type_code":2,"collection_hour":9,"days_since_hire":365,"panel_size":10,"specimen_type":0}'
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "### Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "Image: \`quest-drug-classifier:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Namespace: \`quest-diagnostics\`" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quest Diagnostics — WINGS Platform</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-name">Quest Diagnostics</div>
+          <div class="brand-sub">WINGS Platform</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="live-indicator" id="connectionStatus">
+          <span class="live-dot" id="liveDot"></span>
+          <span id="liveLabel">Live</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- TAB NAV -->
+  <nav class="tab-nav">
+    <div class="tab-nav-inner">
+      <button class="tab-btn active" id="tabIncidents" onclick="switchTab('incidents')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        Incidents
+        <span class="tab-badge" id="tabIncidentsBadge">0</span>
+      </button>
+      <button class="tab-btn" id="tabWorkflows" onclick="switchTab('workflows')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        GitHub Workflows
+        <span class="tab-badge" id="tabWorkflowsBadge">0</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       INCIDENTS VIEW (existing)
+  ════════════════════════════════════════════════════════════ -->
+  <div id="incidentsView">
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-value" id="statTotal">0</div>
+        <div class="stat-label">Total Incidents</div>
+      </div>
+      <div class="stat-card stat-critical">
+        <div class="stat-value" id="statCritical">0</div>
+        <div class="stat-label">Critical</div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-value" id="statWarning">0</div>
+        <div class="stat-label">Warning</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statOccurrences">0</div>
+        <div class="stat-label">Total Occurrences</div>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="search-wrap">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input class="search-input" id="searchInput" type="text" placeholder="Search incidents..." oninput="filterAlerts()" />
+          </div>
+          <select class="filter-select" id="severityFilter" onchange="filterAlerts()">
+            <option value="">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+          </select>
+          <select class="filter-select" id="typeFilter" onchange="filterAlerts()">
+            <option value="">All Types</option>
+            <option value="pipeline_failure">Pipeline Failure</option>
+            <option value="api_connection_issue">API Connection</option>
+            <option value="openscale_outage">OpenScale Outage</option>
+            <option value="evaluation_failure">Evaluation Failure</option>
+            <option value="data_quality_issue">Data Quality</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Table header -->
+      <div class="table-header">
+        <div class="col-severity">Severity</div>
+        <div class="col-title">Incident</div>
+        <div class="col-service">Service</div>
+        <div class="col-namespace">Namespace</div>
+        <div class="col-occurrences">Occurrences</div>
+        <div class="col-time">Last Fired</div>
+        <div class="col-status">Status</div>
+      </div>
+
+      <div id="alertList" class="alert-list">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon-wrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <div class="empty-title">No Active Incidents</div>
+          <div class="empty-sub">Monitoring active. Waiting for Prometheus alerts.</div>
+        </div>
+      </div>
+    </main>
+
+  </div><!-- /incidentsView -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       GITHUB WORKFLOWS VIEW (new)
+  ════════════════════════════════════════════════════════════ -->
+  <div id="workflowsView" style="display:none">
+
+    <!-- WF STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-value" id="wfStatTotal">—</div>
+        <div class="stat-label">Total Runs</div>
+      </div>
+      <div class="stat-card stat-critical">
+        <div class="stat-value" id="wfStatFailed">—</div>
+        <div class="stat-label">Failed</div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-value" id="wfStatRunning">—</div>
+        <div class="stat-label">In Progress</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="wfStatRate">—</div>
+        <div class="stat-label">Success Rate</div>
+      </div>
+    </div>
+
+    <!-- WF MAIN -->
+    <main class="main">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="search-wrap">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input class="search-input" id="wfSearchInput" type="text" placeholder="Search workflows..." oninput="filterWorkflows()" />
+          </div>
+          <select class="filter-select" id="wfStatusFilter" onchange="filterWorkflows()">
+            <option value="">All Statuses</option>
+            <option value="failure">Failed</option>
+            <option value="success">Success</option>
+            <option value="in_progress">In Progress</option>
+          </select>
+          <select class="filter-select" id="wfBranchFilter" onchange="filterWorkflows()">
+            <option value="">All Branches</option>
+            <option value="main">main</option>
+            <option value="develop">develop</option>
+          </select>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-ghost" onclick="fetchWorkflows()" style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div id="wfGrid" class="wf-grid">
+        <div class="wf-empty" id="wfEmptyState">
+          <div class="empty-icon-wrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+          </div>
+          <div class="empty-title">Connecting to GitHub Actions...</div>
+          <div class="empty-sub">Fetching workflow runs from your repository.</div>
+        </div>
+      </div>
+    </main>
+
+  </div><!-- /workflowsView -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       EXISTING MODALS
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- DETAIL MODAL -->
+  <div class="overlay" id="detailOverlay" onclick="closeDetailModal(event)">
+    <div class="modal modal-detail" id="detailModal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="detailTitle"></div>
+          <div class="modal-subtitle" id="detailSubtitle"></div>
+        </div>
+        <button class="close-btn" onclick="closeDetail()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="detailContent"></div>
+    </div>
+  </div>
+
+  <!-- AI CHAT MODAL -->
+  <div class="overlay" id="chatOverlay" onclick="closeChatModal(event)">
+    <div class="modal modal-chat" id="chatModal">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <div class="ai-avatar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+          </div>
+          <div>
+            <div class="chat-title">Investigate with AI</div>
+            <div class="chat-subtitle" id="chatAlertName">WatsonX Incident Assistant</div>
+          </div>
+        </div>
+        <button class="close-btn" onclick="closeChat()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="chat-context" id="chatIncidentCtx"></div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-footer">
+        <input
+          class="chat-input"
+          id="chatInput"
+          type="text"
+          placeholder="Ask about root cause, remediation steps..."
+          onkeydown="if(event.key==='Enter') sendMessage()"
+        />
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          Send
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       WINGS RESOLVE MODAL (new — SSE resolution log stream)
+  ════════════════════════════════════════════════════════════ -->
+  <div class="overlay" id="resolveOverlay" onclick="closeResolveModal(event)">
+    <div class="modal modal-resolve" id="resolveModal">
+
+      <div class="modal-header" style="background:#0d1117;border-color:#30363d">
+        <div>
+          <div class="modal-title" style="color:#e6edf3;display:flex;align-items:center;gap:10px">
+            <div class="wings-badge">WINGS</div>
+            Autonomous Resolution Agent
+          </div>
+          <div class="modal-subtitle" id="resolveRunName" style="color:#8b949e;margin-top:4px"></div>
+        </div>
+        <button class="close-btn" id="resolveCloseBtn" onclick="closeResolve()" style="color:#8b949e">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- run meta strip -->
+      <div class="resolve-meta" id="resolveMetaStrip"></div>
+
+      <!-- log feed -->
+      <div class="resolve-log" id="resolveLog">
+        <div class="log-placeholder">Waiting for agent to start...</div>
+      </div>
+
+      <div class="resolve-footer">
+        <div class="resolve-status-wrap">
+          <span class="resolve-status-dot" id="resolveStatusDot"></span>
+          <span class="resolve-status-text" id="resolveStatusText">Initialising...</span>
+        </div>
+        <button class="btn btn-primary" id="resolveDoneBtn" style="display:none" onclick="closeResolve()">
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+name: Quest MLOps — Model Training Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # nightly 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      fail_mode:
+        description: 'Inject failure mode for demo'
+        required: false
+        default: 'none'
+        type: choice
+        options: [none, auth, dependency, timeout]
+
+env:
+  MYQUEST_API_URL:    ${{ secrets.MYQUEST_API_URL }}
+  MYQUEST_API_TOKEN:  ${{ secrets.MYQUEST_API_TOKEN }}
+
+jobs:
+  train-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── Demo failure injection ──────────────────────────────────────
+      - name: Inject failure mode
+        if: github.event.inputs.fail_mode != 'none' && github.event.inputs.fail_mode != ''
+        run: |
+          echo "DEMO_FAIL_MODE=${{ github.event.inputs.fail_mode }}" >> $GITHUB_ENV
+          echo "[demo] Injecting failure mode: ${{ github.event.inputs.fail_mode }}"
+
+      # ── Data ingestion ──────────────────────────────────────────────
+      - name: Data Ingestion
+        id: data-ingestion
+        run: python src/data_ingestion.py
+        env:
+          MYQUEST_API_TOKEN: ${{ env.MYQUEST_API_TOKEN }}
+          DATA_OUTPUT_PATH: data/lab_results.csv
+
+      # ── Data validation ─────────────────────────────────────────────
+      - name: Data Validation
+        id: data-validation
+        run: |
+          python - << 'PYEOF'
+          import pandas as pd, sys
+          df = pd.read_csv("data/lab_results.csv")
+          assert len(df) > 100,        f"Too few records: {len(df)}"
+          assert "result" in df.columns, "Missing target column 'result'"
+          assert df.isnull().sum().sum() == 0, "Null values found in dataset"
+          print(f"Validation passed: {len(df)} records, columns: {df.columns.tolist()}")
+          PYEOF
+
+      # ── Model training ──────────────────────────────────────────────
+      - name: Model Training
+        id: model-training
+        timeout-minutes: 10
+        run: python src/train.py
+        env:
+          DATA_PATH: data/lab_results.csv
+          ACCURACY_THRESHOLD: '0.75'
+
+      # ── Model evaluation / drift ────────────────────────────────────
+      - name: Model Evaluation
+        id: model-evaluation
+        run: python src/evaluate.py
+
+      # ── Artifacts ───────────────────────────────────────────────────
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drug-test-classifier
+          path: |
+            model/drug_test_classifier.pkl
+            model/metrics.json
+          retention-days: 30
+
+      - name: Upload evaluation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: reports/
+          retention-days: 7
+
+      - name: Pipeline summary
+        if: success()
+        run: |
+          echo "### Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat model/metrics.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

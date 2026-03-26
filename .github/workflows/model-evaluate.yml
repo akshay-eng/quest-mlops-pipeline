@@ -1,0 +1,44 @@
+name: Quest MLOps — Scheduled Evaluation
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 6 AM daily
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Download latest model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: drug-test-classifier
+          path: model/
+        continue-on-error: true  # OK if no artifact yet
+
+      - name: Generate evaluation data
+        run: python data/generate_sample_data.py
+
+      - name: Run drift evaluation
+        run: python src/evaluate.py
+
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
+
+      - name: Evaluation summary
+        if: always()
+        run: echo "Drift evaluation complete. See artifact for HTML report."
