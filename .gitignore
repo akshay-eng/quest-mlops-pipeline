@@ -3,9 +3,12 @@ __pycache__/
 *.pkl
 .env
 venv/
+.venv/
 dist/
 *.egg-info/
 model/*.pkl
 data/*.csv
 reports/
 .DS_Store
+*.prv
+*.pem

@@ -1,0 +1,99 @@
+---
+# Quest MLOps - Milvus Vector DB Remediation Playbook
+# SSH as root (key) -> su - akshay -> sudo docker start milvus-standalone
+
+- name: Fix Milvus Vector DB on IBM Cloud Inference VM
+  hosts: all
+  gather_facts: false
+  become: false
+
+  vars:
+    milvus_container_name: milvus-standalone
+    milvus_home_dir: /home/akshay
+    milvus_health_url: "http://localhost:9091/healthz"
+    akshay_password: "Wipro@123"
+    health_retries: 12
+    health_delay: 5
+
+  tasks:
+
+    - name: Confirm SSH login user
+      ansible.builtin.command: whoami
+      register: whoami_out
+      changed_when: false
+
+    - name: Show login user
+      ansible.builtin.debug:
+        msg: "Logged in as: {{ whoami_out.stdout }}"
+
+    - name: "su - akshay - docker ps (list all containers)"
+      ansible.builtin.shell: >-
+        su - akshay -c
+        "echo {{ akshay_password }} | sudo -S docker ps -a"
+      register: docker_ps_out
+      changed_when: false
+      no_log: true
+
+    - name: Show docker ps output
+      ansible.builtin.debug:
+        msg: "{{ docker_ps_out.stdout_lines }}"
+
+    - name: Check if milvus-standalone is running
+      ansible.builtin.shell: >-
+        su - akshay -c
+        "echo {{ akshay_password }} | sudo -S docker ps --filter name={{ milvus_container_name }} --filter status=running"
+        | grep -c {{ milvus_container_name }} || true
+      register: milvus_running
+      changed_when: false
+
+    - name: Show Milvus running status
+      ansible.builtin.debug:
+        msg: "Milvus running (1=yes 0=stopped): {{ milvus_running.stdout | trim }}"
+
+    - name: "su - akshay - sudo docker start milvus-standalone"
+      ansible.builtin.shell: >-
+        su - akshay -c
+        "echo {{ akshay_password }} | sudo -S docker start {{ milvus_container_name }}"
+      register: start_out
+      when: milvus_running.stdout | trim == "0"
+
+    - name: Show docker start result
+      ansible.builtin.debug:
+        msg: "docker start result: {{ start_out.stdout | default('already running - skipped') }}"
+      when: start_out is not skipped
+
+    - name: Confirm milvus-standalone is now Up
+      ansible.builtin.shell: >-
+        su - akshay -c
+        "echo {{ akshay_password }} | sudo -S docker ps --filter name={{ milvus_container_name }}"
+      register: post_start_ps
+      changed_when: false
+      no_log: true
+
+    - name: Show post-start container status
+      ansible.builtin.debug:
+        msg: "{{ post_start_ps.stdout_lines }}"
+
+    - name: Wait for Milvus health endpoint localhost:9091/healthz
+      ansible.builtin.uri:
+        url: "{{ milvus_health_url }}"
+        method: GET
+        status_code: 200
+        timeout: 5
+      register: health_check
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+      until: health_check.status == 200
+
+    - name: Milvus health confirmed
+      ansible.builtin.debug:
+        msg: "Milvus is healthy HTTP {{ health_check.status }} - ready for model deployment"
+
+    - name: Write remediation log
+      ansible.builtin.shell: |
+        su - akshay -c "mkdir -p {{ milvus_home_dir }}/quest/logs && echo milvus_restart >> {{ milvus_home_dir }}/quest/logs/remediation.log"
+      changed_when: true
+
+    - name: Remediation complete
+      ansible.builtin.debug:
+        msg: "WINGS Remediation Complete - Container {{ milvus_container_name }} is HEALTHY - Re-trigger GitHub Actions next"

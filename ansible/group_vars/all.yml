@@ -1,0 +1,7 @@
+# AWX Tower / Ansible vars for the IBM Cloud inference VM
+# SSH in as root using the private key — no become needed at credential level.
+# User switching to akshay is handled inside the playbook tasks.
+
+ansible_user:            root
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=15"
+ansible_python_interpreter: /usr/bin/python3
