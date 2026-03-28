@@ -630,9 +630,8 @@ function wfDuration(run) {
 }
 
 function buildWfCard(run) {
-  const isFailed  = run.conclusion === 'failure';
-  const isRunning = run.status === 'in_progress';
-  const duration  = wfDuration(run);
+  const isFailed = run.conclusion === 'failure';
+  const duration = wfDuration(run);
 
   // Short workflow name (strip "Quest MLOps — " prefix for brevity if present)
   const shortName = (run.name || 'Workflow').replace(/^Quest MLOps\s*[—–-]\s*/i, '');
@@ -651,7 +650,7 @@ function buildWfCard(run) {
     </a>` : '';
 
   return `
-<div class="wf-card ${wfStatusClass(run)}">
+<div class="wf-card ${wfStatusClass(run)}" onclick="openWfDetail(${run.id})" style="cursor:pointer">
   <div class="wf-card-header">
     ${wfStatusBadge(run)}
     <span class="wf-run-num">#${run.id}</span>
@@ -738,6 +737,168 @@ function openResolve(runId, runName) {
 
   // Start streaming
   startResolveStream(runId);
+}
+
+// =============================================================================
+// WORKFLOW DETAIL MODAL
+// =============================================================================
+let _wfDetailRun = null;
+
+async function openWfDetail(runId) {
+  _wfDetailRun = allRuns.find(r => r.id === runId) || { id: runId };
+  const run = _wfDetailRun;
+  const isFailed = run.conclusion === 'failure';
+
+  // Populate static fields immediately
+  document.getElementById('wfDetailTitle').textContent =
+    (run.name || 'Workflow Run').replace(/^Quest MLOps\s*[—–-]\s*/i, '');
+  document.getElementById('wfDetailStatusBadge').innerHTML = wfStatusBadge(run);
+  document.getElementById('wfDetailMeta').innerHTML = `
+    <span>Run <strong>#${run.id}</strong></span>
+    <span class="wf-sep">·</span>
+    <span>Branch <strong>${escHtml(run.branch || '—')}</strong></span>
+    <span class="wf-sep">·</span>
+    <span>Commit <code>${escHtml(run.commit_sha || '—')}</code></span>
+    <span class="wf-sep">·</span>
+    <span>${formatRelative(run.created_at)}</span>
+  `;
+
+  document.getElementById('wfDetailGhLink').href = run.html_url || '#';
+  const resolveBtn = document.getElementById('wfDetailResolveBtn');
+  resolveBtn.style.display = isFailed ? '' : 'none';
+
+  document.getElementById('wfDetailBody').innerHTML =
+    `<div class="os-detail-loading"><div class="os-loading-spinner"></div>Loading jobs…</div>`;
+  document.getElementById('wfDetailOverlay').classList.add('open');
+
+  // Fetch full detail (jobs + steps)
+  try {
+    const res = await fetch(`${WF_API_BASE}/api/workflows/${runId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const detail = await res.json();
+    _wfDetailRun = { ...run, ...detail };
+    renderWfDetail(_wfDetailRun);
+  } catch (err) {
+    document.getElementById('wfDetailBody').innerHTML =
+      `<div class="os-detail-loading" style="color:var(--critical)">Failed to load: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderWfDetail(run) {
+  const steps  = run.steps || [];
+  const failed = steps.filter(s => s.conclusion === 'failure');
+  const total  = steps.length;
+  const passed = steps.filter(s => s.conclusion === 'success').length;
+
+  // Group steps into jobs (steps have sequential numbers; we treat the whole list as one job for now
+  // but the backend groups by job already — steps is flat across all jobs)
+  // Build job sections by detecting job boundaries via step number resets
+  const jobs = _groupStepsIntoJobs(steps);
+
+  const summaryHtml = `
+    <div class="wf-summary-strip">
+      <div class="wf-sum-item">
+        <span class="wf-sum-icon ok">✓</span>
+        <span><strong>${passed}</strong> passed</span>
+      </div>
+      <div class="wf-sum-item">
+        <span class="wf-sum-icon ${failed.length > 0 ? 'err' : 'ok'}">${failed.length > 0 ? '✗' : '✓'}</span>
+        <span><strong>${failed.length}</strong> failed</span>
+      </div>
+      <div class="wf-sum-item">
+        <span class="wf-sum-label">Total steps</span>
+        <strong>${total}</strong>
+      </div>
+      <div class="wf-sum-item">
+        <span class="wf-sum-label">Duration</span>
+        <strong>${wfDuration(run)}</strong>
+      </div>
+    </div>
+    ${failed.length > 0 ? `
+    <div class="wf-failed-banner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      Failed step${failed.length > 1 ? 's' : ''}:
+      ${failed.map(s => `<strong>${escHtml(s.name)}</strong>`).join(', ')}
+    </div>` : ''}`;
+
+  document.getElementById('wfDetailSummary').innerHTML = summaryHtml;
+
+  // Render jobs + steps
+  const jobsHtml = jobs.map((job, ji) => {
+    const jobFailed  = job.steps.some(s => s.conclusion === 'failure');
+    const jobRunning = job.steps.some(s => s.status === 'in_progress');
+    const jobIcon    = jobFailed ? '✗' : jobRunning ? '◌' : '✓';
+    const jobCls     = jobFailed ? 'err' : jobRunning ? 'run' : 'ok';
+
+    const stepsHtml = job.steps.map(step => {
+      const sc   = step.conclusion;
+      const icon = sc === 'success' ? '✓' : sc === 'failure' ? '✗' : sc === 'skipped' ? '—' : '◌';
+      const cls  = sc === 'success' ? 'ok' : sc === 'failure' ? 'err' : sc === 'skipped' ? 'skip' : 'run';
+      const dur  = _stepDuration(step);
+      return `
+        <div class="wf-step ${sc === 'failure' ? 'wf-step-failed' : ''}">
+          <span class="wf-step-icon ${cls}">${icon}</span>
+          <span class="wf-step-name">${escHtml(step.name)}</span>
+          ${dur ? `<span class="wf-step-dur">${dur}</span>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="wf-job-section">
+        <div class="wf-job-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="wf-step-icon ${jobCls}">${jobIcon}</span>
+          <span class="wf-job-name">${escHtml(job.name)}</span>
+          <svg class="wf-job-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+        <div class="wf-steps-list">${stepsHtml}</div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('wfDetailBody').innerHTML =
+    jobsHtml || '<div class="os-no-metrics">No step data available</div>';
+}
+
+function _groupStepsIntoJobs(steps) {
+  // Backend returns steps flat; we re-group by detecting step.number resets
+  if (!steps.length) return [];
+  const jobs = [];
+  let current = { name: 'Job', steps: [] };
+  let prevNum = 0;
+  for (const s of steps) {
+    if (s.number < prevNum && current.steps.length) {
+      jobs.push(current);
+      current = { name: s.job_name || `Job ${jobs.length + 1}`, steps: [] };
+    }
+    if (s.job_name && !current.nameSet) {
+      current.name    = s.job_name;
+      current.nameSet = true;
+    }
+    current.steps.push(s);
+    prevNum = s.number;
+  }
+  if (current.steps.length) jobs.push(current);
+  return jobs;
+}
+
+function _stepDuration(step) {
+  if (!step.started_at || !step.completed_at) return '';
+  const s = Math.round((new Date(step.completed_at) - new Date(step.started_at)) / 1000);
+  if (s <= 0) return '';
+  return s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+}
+
+function resolveFromDetail() {
+  closeWfDetail();
+  if (_wfDetailRun) openResolve(_wfDetailRun.id, _wfDetailRun.name || '');
+}
+
+function closeWfDetail(e) {
+  if (e && e.target !== document.getElementById('wfDetailOverlay')) return;
+  document.getElementById('wfDetailOverlay').classList.remove('open');
 }
 
 function closeResolve() {
@@ -963,11 +1124,19 @@ function osMonitorRow(label, info) {
     unknown: `<span class="os-mon-icon unknown">—</span>`,
   };
   const icon = iconMap[info.state] || iconMap.unknown;
+  const alertCount = info.alert_count || 0;
+  const stateLabel = info.state === 'ok'
+    ? (alertCount > 0 ? `${alertCount} alert${alertCount > 1 ? 's' : ''}` : 'Healthy')
+    : info.state === 'error'
+      ? `${alertCount > 0 ? alertCount + ' alert' + (alertCount > 1 ? 's' : '') : 'Alert'}`
+      : info.state === 'warning' ? 'Warning'
+      : info.state === 'running' ? 'Running'
+      : 'Unknown';
   return `
     <div class="os-monitor-row">
       ${icon}
       <span class="os-mon-label">${escHtml(label)}</span>
-      <span class="os-mon-state">${escHtml(info.state || '—')}</span>
+      <span class="os-mon-state">${escHtml(stateLabel)}</span>
     </div>`;
 }
 
@@ -1021,67 +1190,201 @@ function buildOsCard(dep) {
 // ---------------------------------------------------------------------------
 // DEPLOYMENT DETAIL MODAL
 // ---------------------------------------------------------------------------
-function openOsDetail(subId) {
+async function openOsDetail(subId) {
   const dep = allDeployments.find(d => d.id === subId);
   if (!dep) return;
   currentDeployment = dep;
 
+  // Show modal immediately with a loading skeleton
   document.getElementById('osDetailTitle').textContent    = dep.name;
   document.getElementById('osDetailSubtitle').textContent =
     `${dep.deployment_type || 'online'} · ${dep.problem_type || 'binary'} · Watson OpenScale`;
+  document.getElementById('osDetailContent').innerHTML =
+    `<div class="os-detail-loading"><div class="os-loading-spinner"></div>Loading monitor details…</div>`;
+  document.getElementById('osDetailOverlay').classList.add('open');
 
+  try {
+    const res = await fetch(`${WF_API_BASE}/api/openscale/deployments/${subId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const detail = await res.json();
+    currentDeployment = { ...dep, ...detail };
+    renderOsDetail(currentDeployment);
+  } catch (err) {
+    document.getElementById('osDetailContent').innerHTML =
+      `<div class="os-detail-loading" style="color:var(--critical)">Failed to load details: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderOsDetail(dep) {
   const monitors  = dep.monitors || {};
-  const monOrder  = ['quality', 'fairness', 'drift_v2', 'explainability'];
-  const monBlocks = monOrder.filter(k => monitors[k]).map(k => {
-    const m     = monitors[k];
-    const color = m.state === 'ok' ? 'success' : m.state === 'error' ? 'critical' : 'warning';
-    return `
-      <div class="detail-field">
-        <div class="field-label">${escHtml(m.label)}</div>
-        <div class="field-value" style="color:var(--${color})">
-          ${m.state === 'ok' ? '✓ Healthy' : m.state === 'error' ? '✗ Error' : m.state || '—'}
+  const monOrder  = ['fairness', 'quality', 'drift_v2', 'explainability'];
+  const hasAlerts = dep.overall_status === 'alert';
+
+  // ── Summary row ──────────────────────────────────────────────────────────
+  const tests = dep.tests;
+  const totalAlerts = Object.values(monitors).reduce((s, m) => s + (m.alert_count || 0), 0);
+
+  let donutHtml = '';
+  if (tests && tests.run > 0) {
+    const pct = Math.round((tests.passed / tests.run) * 100);
+    donutHtml = `
+      <div class="os-donut-wrap">
+        <svg class="os-donut" viewBox="0 0 36 36">
+          <circle class="os-donut-bg" cx="18" cy="18" r="15.915" fill="none" stroke-width="3.5"/>
+          <circle class="os-donut-pass" cx="18" cy="18" r="15.915" fill="none" stroke-width="3.5"
+            stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="25"/>
+          <circle class="os-donut-fail" cx="18" cy="18" r="15.915" fill="none" stroke-width="3.5"
+            stroke-dasharray="${100 - pct} ${pct}" stroke-dashoffset="${25 - pct}"/>
+        </svg>
+        <div class="os-donut-label">${tests.run}<div class="os-donut-sub">Tests run</div></div>
+      </div>
+      <div class="os-test-counts">
+        <div class="os-test-stat passed">
+          <span class="os-test-icon">✓</span><span class="os-test-num">${tests.passed}</span>
+          <span class="os-test-lbl">Tests passed</span>
+        </div>
+        <div class="os-test-stat failed">
+          <span class="os-test-icon">!</span><span class="os-test-num">${tests.failed}</span>
+          <span class="os-test-lbl">Tests failed</span>
         </div>
       </div>`;
-  }).join('');
+  }
 
-  document.getElementById('osDetailContent').innerHTML = `
-    <div class="detail-section">
-      <div class="section-label">Overview</div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        ${osStatusBadge(dep)}
-        ${dep.approved ? '<span class="badge badge-success">Approved</span>' : ''}
-        <span class="badge badge-neutral">${escHtml(dep.deployment_type || 'online')}</span>
+  const scoringHtml = dep.scoring && (dep.scoring.last_eval || dep.scoring.last_7d) ? `
+    <div class="os-stat-block">
+      <div class="os-stat-label">Scoring requests</div>
+      <div class="os-stat-row">
+        ${dep.scoring.last_eval != null ? `<div class="os-stat-num">${dep.scoring.last_eval.toLocaleString()}<span class="os-stat-period"> in last evaluation</span></div>` : ''}
+        ${dep.scoring.last_7d  != null ? `<div class="os-stat-num">${dep.scoring.last_7d.toLocaleString()}<span class="os-stat-period"> last 7 days</span></div>` : ''}
       </div>
-      <div style="font-size:13px;color:var(--text-muted)">
-        Deployment: <strong>${escHtml(dep.deployment_name || dep.name)}</strong><br/>
-        Problem type: <strong>${escHtml(dep.problem_type || '—')}</strong><br/>
-        Last evaluated: <strong>${dep.last_evaluated ? formatFull(dep.last_evaluated) : 'Not evaluated'}</strong>
+    </div>` : '';
+
+  const recordCounts = Object.values(monitors)
+    .filter(m => m.records_count > 0)
+    .map(m => m.records_count);
+  const maxRecords = recordCounts.length ? Math.max(...recordCounts) : null;
+  const recordsHtml = maxRecords ? `
+    <div class="os-stat-block">
+      <div class="os-stat-label">Records</div>
+      <div class="os-stat-num">${maxRecords.toLocaleString()}<span class="os-stat-period"> in last evaluation</span></div>
+    </div>` : '';
+
+  const summaryHtml = `
+    <div class="os-summary-row">
+      <div class="os-summary-card">
+        <div class="os-summary-card-title">Deployment details</div>
+        ${dep.explanations != null ? `<div class="os-detail-kv"><span class="os-kv-label">Number of explanations</span><span class="os-kv-val accent">${dep.explanations}</span></div>` : ''}
+        <div class="os-detail-kv"><span class="os-kv-label">Type</span><span class="os-kv-val">${escHtml(dep.deployment_type || 'online')}</span></div>
+        <div class="os-detail-kv"><span class="os-kv-label">Problem</span><span class="os-kv-val">${escHtml(dep.problem_type || '—')}</span></div>
+        ${dep.approved ? '<div class="os-detail-kv"><span class="os-kv-label">Status</span><span class="badge badge-success" style="font-size:10px">Approved</span></div>' : ''}
       </div>
-    </div>
-    <div class="detail-section">
-      <div class="section-label">Monitor Status</div>
-      <div class="detail-grid">${monBlocks}</div>
-    </div>
-    <div class="detail-section">
-      <div class="section-label">Suggested Actions</div>
-      <div class="actions-list">
-        ${dep.overall_status === 'alert' ? `
-        <div class="action-row"><span class="action-num">1</span>
-          <span class="action-text">Review quality monitor — check feedback logging table for new labeled records</span></div>
-        <div class="action-row"><span class="action-num">2</span>
-          <span class="action-text">Investigate fairness violations — check monitored features for biased prediction distribution</span></div>
-        <div class="action-row"><span class="action-num">3</span>
-          <span class="action-text">Run drift analysis — compare current payload distribution against training baseline</span></div>
-        <div class="action-row"><span class="action-num">4</span>
-          <span class="action-text">Trigger WINGS agent to autonomously diagnose and escalate to Watson X Orchestrate</span></div>
-        ` : `
-        <div class="action-row"><span class="action-num">1</span>
-          <span class="action-text">Model is healthy — continue monitoring on scheduled cadence</span></div>
-        `}
+      ${tests && tests.run > 0 ? `
+      <div class="os-summary-card">
+        <div class="os-summary-card-title">Test details</div>
+        <div class="os-test-row">${donutHtml}</div>
+      </div>` : ''}
+      <div class="os-summary-card">
+        <div class="os-summary-card-title">Model health
+          <span class="os-health-arrow">→</span>
+        </div>
+        <div class="os-health-alert-count">
+          <span class="os-health-icon ${totalAlerts > 0 ? 'error' : 'ok'}">${totalAlerts > 0 ? '!' : '✓'}</span>
+          <span class="os-health-num">${totalAlerts}</span>
+          <span class="os-health-label">Alert${totalAlerts !== 1 ? 's' : ''}</span>
+        </div>
+        ${scoringHtml}
+        ${recordsHtml}
       </div>
     </div>`;
 
-  document.getElementById('osDetailOverlay').classList.add('open');
+  // ── Monitor sections (metric tables) ─────────────────────────────────────
+  const monSections = monOrder
+    .filter(k => monitors[k])
+    .map(k => {
+      const m          = monitors[k];
+      const alertCount = m.alert_count || 0;
+      const metrics    = m.metrics || [];
+      const isExplain  = k === 'explainability';
+
+      const alertBadge = alertCount > 0
+        ? `<span class="os-mon-alert-badge">Alerts triggered</span>`
+        : `<span class="os-mon-ok-badge">No alerts</span>`;
+
+      const alertNum = alertCount > 0
+        ? `<div class="os-mon-alert-num"><span class="os-alert-dot">!</span>${alertCount}</div>` : '';
+
+      // Fairness: show monitored group as sub-header
+      const groupHeader = (k === 'fairness' && m.monitored_feature) ? `
+        <div class="os-fairness-group">
+          <span class="os-fg-label">Monitored feature</span>
+          <span class="os-fg-val">${escHtml(m.monitored_feature)}${m.monitored_value ? ': ' + escHtml(m.monitored_value) : ''}</span>
+        </div>` : '';
+
+      let tableHtml = '<div class="os-no-metrics">No metric data available</div>';
+
+      if (metrics.length > 0) {
+        if (isExplain) {
+          // Explainability: Feature | Influence score (no violation column)
+          const rows = metrics.map(metric => {
+            const valStr = metric.value == null ? '—' : metric.value;
+            return `<tr>
+              <td class="os-metric-name">${escHtml(metric.name)}</td>
+              <td class="os-metric-val">${valStr}</td>
+            </tr>`;
+          }).join('');
+          tableHtml = `
+            <table class="os-metric-table">
+              <thead><tr><th>Metric / Feature</th><th>Score</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`;
+        } else {
+          const rows = metrics.map(metric => {
+            const valStr = metric.value == null ? '—'
+              : metric.id === 'disparate_impact'
+                ? (metric.value * 100).toFixed(2) + '%'
+                : metric.value;
+            const violNum  = metric.violation;
+            const violStr  = violNum == null ? 'none'
+              : violNum === 0   ? 'none'
+              : violNum < 0.01  ? '<0.01'
+              : String(violNum);
+            const violClass = (violNum && violNum > 0) ? 'os-viol-yes' : 'os-viol-no';
+            return `<tr>
+              <td class="os-metric-name">${escHtml(metric.name)}</td>
+              <td class="os-metric-val">${valStr}</td>
+              <td class="os-metric-viol ${violClass}">${escHtml(violStr)}</td>
+            </tr>`;
+          }).join('');
+          tableHtml = `
+            <table class="os-metric-table">
+              <thead><tr><th>Metric</th><th>Score</th><th>Violation</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`;
+        }
+      }
+
+      const groupFooter = (!isExplain && (m.monitored_feature || m.monitored_value)) ? `
+        <div class="os-mon-footer">Associated group: ${escHtml(m.monitored_feature || '')}${m.monitored_value ? ': ' + escHtml(m.monitored_value) : ''}</div>` : '';
+      const recordsFooter = m.records_count > 0
+        ? `<div class="os-mon-footer">${m.records_count.toLocaleString()} records evaluated</div>` : '';
+
+      return `
+        <div class="os-mon-section">
+          <div class="os-mon-section-header">
+            <span class="os-mon-section-title">${escHtml(m.label)}</span>
+            ${alertBadge}
+          </div>
+          ${alertNum}
+          ${groupHeader}
+          ${tableHtml}
+          ${groupFooter}
+          ${recordsFooter}
+        </div>`;
+    }).join('');
+
+  document.getElementById('osDetailContent').innerHTML =
+    summaryHtml +
+    `<div class="os-mon-grid">${monSections}</div>`;
 }
 
 function closeOsDetail(e) {

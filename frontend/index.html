@@ -310,6 +310,39 @@
     </div>
   </div>
 
+  <!-- WORKFLOW DETAIL MODAL -->
+  <div class="overlay" id="wfDetailOverlay" onclick="closeWfDetail(event)">
+    <div class="modal wf-detail-modal" id="wfDetailModal">
+      <div class="wf-detail-header">
+        <div class="wf-detail-header-left">
+          <div id="wfDetailStatusBadge"></div>
+          <div>
+            <div class="wf-detail-title" id="wfDetailTitle">Workflow Run</div>
+            <div class="wf-detail-meta" id="wfDetailMeta"></div>
+          </div>
+        </div>
+        <button class="close-btn" onclick="closeWfDetail()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="wf-detail-summary" id="wfDetailSummary"></div>
+      <div class="wf-detail-body" id="wfDetailBody">
+        <div class="os-detail-loading"><div class="os-loading-spinner"></div>Loading jobs…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ai" id="wfDetailResolveBtn" onclick="resolveFromDetail()" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          Resolve with WINGS
+        </button>
+        <a class="btn btn-ghost" id="wfDetailGhLink" href="#" target="_blank">View on GitHub ↗</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════════════════════════════════════
        EXISTING MODALS
   ════════════════════════════════════════════════════════════ -->
