@@ -98,6 +98,8 @@ body {
   max-width: 1400px; margin: 0 auto;
   padding: 0 28px;
   display: flex;
+  align-items: center;
+  position: relative;
 }
 .tab-btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -1574,3 +1576,103 @@ body {
 .dash-act-text { color: var(--text-muted); line-height: 1.4; }
 .dash-act-text strong { color: var(--text); }
 .dash-act-text em { font-style: normal; color: var(--accent); }
+
+/* ============================================================
+   USER AVATAR & DROPDOWN MENU
+   ============================================================ */
+
+.tab-user-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  margin-left: 8px;
+  flex-shrink: 0;
+  transition: box-shadow .15s;
+  position: relative;
+}
+.tab-user-avatar:hover {
+  box-shadow: 0 0 0 3px rgba(29,78,216,.2);
+}
+.tab-user-initials {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: .5px;
+  user-select: none;
+}
+
+.user-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.06);
+  z-index: 1000;
+  overflow: hidden;
+  animation: menuSlideIn .15s ease;
+}
+.user-menu.open { display: block; }
+
+@keyframes menuSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.user-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+.user-menu-avatar {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff;
+  flex-shrink: 0;
+}
+.user-menu-info { min-width: 0; }
+.user-menu-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-email {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0;
+}
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .1s;
+}
+.user-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.user-menu-item svg { flex-shrink: 0; }
+.user-menu-item-danger { color: #dc2626; }
+.user-menu-item-danger:hover { background: #fef2f2; color: #dc2626; }

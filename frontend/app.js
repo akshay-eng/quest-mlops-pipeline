@@ -2081,6 +2081,24 @@ function _liveCount(severity) {
   return (allAlerts || []).filter(a => (a.severity || '').toLowerCase() === severity).length;
 }
 
+// =============================================================================
+// USER MENU
+// =============================================================================
+
+function toggleUserMenu(e) {
+  e.stopPropagation();
+  document.getElementById('userMenu').classList.toggle('open');
+}
+function closeUserMenu() {
+  document.getElementById('userMenu').classList.remove('open');
+}
+document.addEventListener('click', function(e) {
+  const menu = document.getElementById('userMenu');
+  if (menu && !menu.contains(e.target) && e.target !== document.getElementById('userAvatarBtn')) {
+    menu.classList.remove('open');
+  }
+});
+
 function updateDashKPIs() {
   // Active alerts — live
   const total = (allAlerts || []).length;
