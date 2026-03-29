@@ -15,6 +15,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -----------------------------------------------------------------------
+      # STEP 1 — Milvus Vector DB health check
+      # This step will FAIL when force_fail=true, triggering the WINGS agent.
+      # The agent detects the failure, runs Ansible via AWX to restore Milvus,
+      # then re-triggers this workflow. On rerun force_fail defaults to false
+      # and the health check passes.
+      # -----------------------------------------------------------------------
       - name: Check Milvus Vector DB Health
         run: |
           if [ "${{ github.event.inputs.force_fail }}" = "true" ]; then
@@ -23,6 +30,9 @@ jobs:
           fi
           echo "Milvus Vector DB is healthy at 150.239.168.255:9091"
 
+      # -----------------------------------------------------------------------
+      # STEP 2 — Deploy the classification model
+      # -----------------------------------------------------------------------
       - name: Deploy Model to Inference Server
         run: |
           echo "Deploying drug-test-classifier model..."
@@ -31,12 +41,40 @@ jobs:
           echo "Milvus  : 150.239.168.255:19530 (healthy)"
           echo "Status  : Model deployed successfully."
 
+      # -----------------------------------------------------------------------
+      # STEP 3 — Register monitoring in Evidently AI Cloud
+      # Sends a DataDrift + Classification quality report to Evidently Cloud.
+      # Requires secrets: EVIDENTLY_API_KEY, EVIDENTLY_PROJECT_ID
+      # Non-blocking: exits 0 if credentials are absent (demo fallback).
+      # -----------------------------------------------------------------------
+      - name: Set up Python for Evidently
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Register Model Monitoring in Evidently AI Cloud
+        env:
+          EVIDENTLY_API_KEY:    ${{ secrets.EVIDENTLY_API_KEY }}
+          EVIDENTLY_PROJECT_ID: ${{ secrets.EVIDENTLY_PROJECT_ID }}
+          GITHUB_SHA:           ${{ github.sha }}
+        run: |
+          pip install evidently pandas --quiet
+          curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/src/monitor_evidently.py \
+            -o monitor_evidently.py
+          python monitor_evidently.py
+
+      # -----------------------------------------------------------------------
+      # STEP 4 — Write a GitHub Actions job summary
+      # -----------------------------------------------------------------------
       - name: Deployment Summary
         run: |
-          echo "### Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| Model | drug-test-classifier |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Milvus | 150.239.168.255:19530 (healthy) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | Deployed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | Evidently AI Cloud |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Deployed + Monitored |" >> $GITHUB_STEP_SUMMARY
