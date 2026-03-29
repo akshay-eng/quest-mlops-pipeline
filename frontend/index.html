@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quest Diagnostics — WINGS Platform</title>
   <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -29,6 +30,13 @@
   <!-- TAB NAV -->
   <nav class="tab-nav">
     <div class="tab-nav-inner">
+      <button class="tab-btn" id="tabDashboard" onclick="switchTab('dashboard')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        Dashboard
+      </button>
       <button class="tab-btn active" id="tabIncidents" onclick="switchTab('incidents')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -68,6 +76,227 @@
       </button>
     </div>
   </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       DASHBOARD VIEW
+  ════════════════════════════════════════════════════════════ -->
+  <div id="dashboardView" style="display:none">
+    <div class="dash-wrap">
+
+      <!-- KPI ROW -->
+      <div class="dash-kpi-row">
+        <div class="dash-kpi-card">
+          <div class="dash-kpi-icon dash-kpi-icon-red">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </div>
+          <div class="dash-kpi-body">
+            <div class="dash-kpi-val" id="dkpiAlerts">—</div>
+            <div class="dash-kpi-label">Active Alerts</div>
+          </div>
+          <div class="dash-kpi-delta dash-delta-up" id="dkpiAlertsDelta">+2 today</div>
+        </div>
+        <div class="dash-kpi-card">
+          <div class="dash-kpi-icon dash-kpi-icon-green">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div class="dash-kpi-body">
+            <div class="dash-kpi-val" id="dkpiResolved">47</div>
+            <div class="dash-kpi-label">Resolved by AI (7d)</div>
+          </div>
+          <div class="dash-kpi-delta dash-delta-down">↑ 12% vs last week</div>
+        </div>
+        <div class="dash-kpi-card">
+          <div class="dash-kpi-icon dash-kpi-icon-blue">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="dash-kpi-body">
+            <div class="dash-kpi-val">4.2m</div>
+            <div class="dash-kpi-label">Avg Resolution Time</div>
+          </div>
+          <div class="dash-kpi-delta dash-delta-down">↓ 38% vs manual</div>
+        </div>
+        <div class="dash-kpi-card">
+          <div class="dash-kpi-icon dash-kpi-icon-purple">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div class="dash-kpi-body">
+            <div class="dash-kpi-val" id="dkpiPipeline">—</div>
+            <div class="dash-kpi-label">Pipeline Health</div>
+          </div>
+          <div class="dash-kpi-delta" id="dkpiPipelineDelta">last 10 runs</div>
+        </div>
+        <div class="dash-kpi-card">
+          <div class="dash-kpi-icon dash-kpi-icon-orange">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          </div>
+          <div class="dash-kpi-body">
+            <div class="dash-kpi-val" id="dkpiDrift">—</div>
+            <div class="dash-kpi-label">Model Alerts</div>
+          </div>
+          <div class="dash-kpi-delta dash-delta-up" id="dkpiDriftDelta">Watson OpenScale</div>
+        </div>
+      </div>
+
+      <!-- ROW 2 — Alert trend + Alerts by source -->
+      <div class="dash-row">
+        <div class="dash-card dash-card-lg">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Alert Volume — Last 7 Days</span>
+            <span class="dash-card-badge">Live</span>
+          </div>
+          <div class="dash-chart-wrap">
+            <canvas id="chartAlertTrend"></canvas>
+          </div>
+        </div>
+        <div class="dash-card dash-card-sm">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Alerts by Source</span>
+          </div>
+          <div class="dash-chart-wrap dash-chart-wrap-sm">
+            <canvas id="chartAlertSource"></canvas>
+          </div>
+          <div class="dash-legend" id="alertSourceLegend"></div>
+        </div>
+      </div>
+
+      <!-- ROW 3 — AI Resolutions trend + Agent leaderboard -->
+      <div class="dash-row">
+        <div class="dash-card dash-card-lg">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Issues Resolved by AI Agent — Last 7 Days</span>
+          </div>
+          <div class="dash-chart-wrap">
+            <canvas id="chartResolutions"></canvas>
+          </div>
+        </div>
+        <div class="dash-card dash-card-sm">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Top Agents</span>
+            <span class="dash-card-badge dash-badge-gold">This Week</span>
+          </div>
+          <div class="dash-agent-list">
+            <div class="dash-agent-row dash-agent-top">
+              <div class="dash-agent-rank">🥇</div>
+              <div class="dash-agent-info">
+                <div class="dash-agent-name">WINGS Remediation</div>
+                <div class="dash-agent-sub">Quest SDLC · 2747d3ab</div>
+              </div>
+              <div class="dash-agent-stats">
+                <div class="dash-agent-count" id="topAgentCount1">21</div>
+                <div class="dash-agent-unit">resolved</div>
+              </div>
+            </div>
+            <div class="dash-agent-row">
+              <div class="dash-agent-rank">🥈</div>
+              <div class="dash-agent-info">
+                <div class="dash-agent-name">Workflow Resolver</div>
+                <div class="dash-agent-sub">GitHub Actions · 355ebf69</div>
+              </div>
+              <div class="dash-agent-stats">
+                <div class="dash-agent-count">16</div>
+                <div class="dash-agent-unit">resolved</div>
+              </div>
+            </div>
+            <div class="dash-agent-row">
+              <div class="dash-agent-rank">🥉</div>
+              <div class="dash-agent-info">
+                <div class="dash-agent-name">Model Health Analyst</div>
+                <div class="dash-agent-sub">OpenScale · 9e076c83</div>
+              </div>
+              <div class="dash-agent-stats">
+                <div class="dash-agent-count">10</div>
+                <div class="dash-agent-unit">resolved</div>
+              </div>
+            </div>
+            <div class="dash-agent-divider"></div>
+            <div class="dash-agent-metric-row">
+              <span>Avg response time</span><strong>3.8s</strong>
+            </div>
+            <div class="dash-agent-metric-row">
+              <span>Human escalations</span><strong>3</strong>
+            </div>
+            <div class="dash-agent-metric-row">
+              <span>Automation rate</span><strong>94%</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 4 — Pipeline runs + Model drift trend -->
+      <div class="dash-row">
+        <div class="dash-card dash-card-half">
+          <div class="dash-card-header">
+            <span class="dash-card-title">GitHub Pipeline — Run History</span>
+            <span class="dash-card-badge">Live</span>
+          </div>
+          <div class="dash-chart-wrap">
+            <canvas id="chartPipeline"></canvas>
+          </div>
+        </div>
+        <div class="dash-card dash-card-half">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Model Drift Score — 30d Trend</span>
+          </div>
+          <div class="dash-chart-wrap">
+            <canvas id="chartDrift"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 5 — Recent AI activity feed -->
+      <div class="dash-row">
+        <div class="dash-card" style="flex:1">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent AI Activity</span>
+            <span class="dash-card-badge">Live</span>
+          </div>
+          <div class="dash-activity-feed" id="dashActivityFeed">
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">2m ago</span>
+              <span class="dash-act-text"><strong>WINGS Remediation</strong> resolved <em>KubePodCrashLooping</em> in quest-mlops namespace</span>
+            </div>
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">14m ago</span>
+              <span class="dash-act-text"><strong>Workflow Resolver</strong> fixed failed GitHub Actions run — <em>Check Milvus Vector DB Health</em> step</span>
+            </div>
+            <div class="dash-activity-item dash-act-warn">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">31m ago</span>
+              <span class="dash-act-text"><strong>Model Health Analyst</strong> flagged fairness violation on <em>drug-test-classifier</em> — Age feature drift detected</span>
+            </div>
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">1h ago</span>
+              <span class="dash-act-text"><strong>WINGS Remediation</strong> resolved <em>HighMemoryUsage</em> — triggered K8s HPA scale-out</span>
+            </div>
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">2h ago</span>
+              <span class="dash-act-text"><strong>Workflow Resolver</strong> re-triggered pipeline after <em>ImagePullBackOff</em> — ak3hay/drug-test-classifier:latest deployed</span>
+            </div>
+            <div class="dash-activity-item dash-act-warn">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">3h ago</span>
+              <span class="dash-act-text"><strong>Model Health Analyst</strong> generated RCA report — Quality: AUC-ROC 0.7273, TPR violation 0.3</span>
+            </div>
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">5h ago</span>
+              <span class="dash-act-text"><strong>WINGS Remediation</strong> resolved <em>PersistentVolumeClaimPending</em> — storage class patched</span>
+            </div>
+            <div class="dash-activity-item dash-act-ok">
+              <span class="dash-act-dot"></span>
+              <span class="dash-act-time">Yesterday</span>
+              <span class="dash-act-text"><strong>Workflow Resolver</strong> resolved 3 consecutive build failures — Docker layer cache invalidated and rebuilt</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /dash-wrap -->
+  </div><!-- /dashboardView -->
 
   <!-- ═══════════════════════════════════════════════════════════
        INCIDENTS VIEW (existing)

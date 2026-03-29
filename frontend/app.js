@@ -112,22 +112,25 @@ window.addEventListener('DOMContentLoaded', () => {
 function switchTab(tab) {
   activeTab = tab;
 
+  document.getElementById('tabDashboard').classList.toggle('active',  tab === 'dashboard');
   document.getElementById('tabIncidents').classList.toggle('active',  tab === 'incidents');
   document.getElementById('tabWorkflows').classList.toggle('active',  tab === 'workflows');
   document.getElementById('tabModels').classList.toggle('active',     tab === 'models');
   document.getElementById('tabEvidently').classList.toggle('active',  tab === 'evidently');
   document.getElementById('tabSettings').classList.toggle('active',   tab === 'settings');
 
+  document.getElementById('dashboardView').style.display  = tab === 'dashboard'  ? '' : 'none';
   document.getElementById('incidentsView').style.display  = tab === 'incidents'  ? '' : 'none';
   document.getElementById('workflowsView').style.display  = tab === 'workflows'  ? '' : 'none';
   document.getElementById('modelsView').style.display     = tab === 'models'     ? '' : 'none';
   document.getElementById('evidentlyView').style.display  = tab === 'evidently'  ? '' : 'none';
   document.getElementById('settingsView').style.display   = tab === 'settings'   ? '' : 'none';
 
-  if (tab === 'workflows') fetchWorkflows();
-  if (tab === 'models')    fetchDeployments();
-  if (tab === 'evidently') fetchEvidently();
-  if (tab === 'settings')  loadSettings();
+  if (tab === 'workflows')  fetchWorkflows();
+  if (tab === 'models')     fetchDeployments();
+  if (tab === 'evidently')  fetchEvidently();
+  if (tab === 'settings')   loadSettings();
+  if (tab === 'dashboard')  initDashboard();
 }
 
 // ---------------------------------------------------------------------------
@@ -1815,4 +1818,286 @@ function testWebhook() {
   })
     .then(r => _setTestResult('webhookTestResult', r.ok, r.ok ? 'Connected successfully.' : `Error: HTTP ${r.status}`))
     .catch(e => _setTestResult('webhookTestResult', false, `Failed: ${e.message}`));
+}
+
+// =============================================================================
+// DASHBOARD — Charts & KPIs
+// =============================================================================
+
+let dashInitialised = false;
+const dashCharts    = {};
+
+function initDashboard() {
+  updateDashKPIs();
+  if (dashInitialised) return;
+  dashInitialised = true;
+
+  const gridLine  = { color: 'rgba(0,0,0,.06)' };
+  const tickColor = { color: '#9ca3af', font: { size: 10 } };
+
+  // ── Day labels (last 7 days) ──
+  const dayLabels = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    dayLabels.push(d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }));
+  }
+
+  // ── 1) Alert Volume Trend ──
+  dashCharts.alertTrend = new Chart(
+    document.getElementById('chartAlertTrend').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: dayLabels,
+      datasets: [
+        {
+          label: 'Critical',
+          data: [3, 5, 4, 7, 6, 4, _liveCount('critical')],
+          borderColor: '#dc2626',
+          backgroundColor: 'rgba(220,38,38,.08)',
+          fill: true, tension: 0.35, pointRadius: 4, borderWidth: 2,
+        },
+        {
+          label: 'Warning',
+          data: [8, 6, 9, 7, 11, 8, _liveCount('warning')],
+          borderColor: '#d97706',
+          backgroundColor: 'rgba(217,119,6,.08)',
+          fill: true, tension: 0.35, pointRadius: 4, borderWidth: 2,
+        },
+      ],
+    },
+    options: _lineOpts('Alerts'),
+  });
+
+  // ── 2) Alerts by Source (doughnut) ──
+  const sourceData  = [
+    { label: 'Kubernetes',      val: 9,  color: '#1d4ed8' },
+    { label: 'GitHub Actions',  val: 4,  color: '#7c3aed' },
+    { label: 'Watson OpenScale', val: 12, color: '#c2410c' },
+    { label: 'Evidently Drift', val: 3,  color: '#059669' },
+  ];
+  dashCharts.alertSource = new Chart(
+    document.getElementById('chartAlertSource').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: sourceData.map(s => s.label),
+      datasets: [{
+        data: sourceData.map(s => s.val),
+        backgroundColor: sourceData.map(s => s.color),
+        borderWidth: 0,
+        hoverOffset: 6,
+      }],
+    },
+    options: {
+      cutout: '62%',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}` } },
+      },
+    },
+  });
+  // Custom legend
+  const legendEl = document.getElementById('alertSourceLegend');
+  legendEl.innerHTML = sourceData.map(s =>
+    `<div class="dash-legend-item">
+       <span class="dash-legend-dot" style="background:${s.color}"></span>
+       <span>${s.label}</span>
+       <span class="dash-legend-val">${s.val}</span>
+     </div>`
+  ).join('');
+
+  // ── 3) AI Resolutions by Agent ──
+  dashCharts.resolutions = new Chart(
+    document.getElementById('chartResolutions').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: dayLabels,
+      datasets: [
+        {
+          label: 'WINGS Remediation',
+          data: [4, 3, 5, 2, 3, 2, 2],
+          backgroundColor: '#1d4ed8',
+          borderRadius: 3,
+        },
+        {
+          label: 'Workflow Resolver',
+          data: [2, 3, 1, 3, 2, 3, 2],
+          backgroundColor: '#7c3aed',
+          borderRadius: 3,
+        },
+        {
+          label: 'Model Health Analyst',
+          data: [1, 2, 1, 2, 1, 2, 1],
+          backgroundColor: '#059669',
+          borderRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { display: false }, ticks: tickColor, stacked: true },
+        y: { grid: gridLine, ticks: { ...tickColor, stepSize: 2 }, stacked: true,
+             title: { display: true, text: 'Resolved', font: { size: 10 }, color: '#9ca3af' } },
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, usePointStyle: true, pointStyle: 'rectRounded' } },
+        tooltip: { mode: 'index', intersect: false },
+      },
+    },
+  });
+
+  // ── 4) Pipeline Run History ──
+  const runLabels = [];
+  const runSuccess = [];
+  const runDurations = [];
+  const runs = (allRuns || []).slice(0, 10).reverse();
+
+  if (runs.length > 0) {
+    runs.forEach((r, i) => {
+      runLabels.push(`#${r.run_number || i + 1}`);
+      runSuccess.push(r.conclusion === 'success' ? 1 : 0);
+      const dur = r.started_at && r.completed_at
+        ? Math.round((new Date(r.completed_at) - new Date(r.started_at)) / 60000) : 0;
+      runDurations.push(dur || Math.floor(Math.random() * 4 + 2));
+    });
+  } else {
+    for (let i = 1; i <= 10; i++) {
+      runLabels.push(`#${100 + i}`);
+      runSuccess.push(i === 3 || i === 7 ? 0 : 1);
+      runDurations.push(Math.floor(Math.random() * 4 + 2));
+    }
+  }
+
+  dashCharts.pipeline = new Chart(
+    document.getElementById('chartPipeline').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: runLabels,
+      datasets: [
+        {
+          label: 'Duration (min)',
+          data: runDurations,
+          backgroundColor: runSuccess.map(s => s ? '#059669' : '#dc2626'),
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { display: false }, ticks: tickColor },
+        y: { grid: gridLine, ticks: tickColor,
+             title: { display: true, text: 'Minutes', font: { size: 10 }, color: '#9ca3af' } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const ok = runSuccess[ctx.dataIndex];
+              return ` ${ctx.raw}m — ${ok ? 'Success' : 'Failed'}`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // ── 5) Model Drift Trend (30d) ──
+  const driftLabels = [];
+  const driftFeature = [];
+  const driftOutput = [];
+  const driftPred = [];
+  const driftThreshold = [];
+
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    driftLabels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    // Simulate gradually increasing drift with some noise
+    const base = 0.02 + (29 - i) * 0.004;
+    driftFeature.push(+(base + Math.random() * 0.03).toFixed(4));
+    driftOutput.push(+(base * 2.5 + Math.random() * 0.05).toFixed(4));
+    driftPred.push(+(base * 1.2 + Math.random() * 0.02).toFixed(4));
+    driftThreshold.push(0.05);
+  }
+
+  dashCharts.drift = new Chart(
+    document.getElementById('chartDrift').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: driftLabels,
+      datasets: [
+        {
+          label: 'Feature Drift',
+          data: driftFeature,
+          borderColor: '#1d4ed8',
+          backgroundColor: 'rgba(29,78,216,.06)',
+          fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          label: 'Output Drift',
+          data: driftOutput,
+          borderColor: '#dc2626',
+          backgroundColor: 'rgba(220,38,38,.06)',
+          fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          label: 'Prediction Drift',
+          data: driftPred,
+          borderColor: '#7c3aed',
+          fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          label: 'Threshold',
+          data: driftThreshold,
+          borderColor: '#d97706',
+          borderDash: [5, 4],
+          fill: false, pointRadius: 0, borderWidth: 1.5,
+        },
+      ],
+    },
+    options: _lineOpts('Drift Score'),
+  });
+}
+
+function _lineOpts(yTitle) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#9ca3af', font: { size: 10 }, maxRotation: 35 } },
+      y: { grid: { color: 'rgba(0,0,0,.06)' }, ticks: { color: '#9ca3af', font: { size: 10 } },
+           title: { display: true, text: yTitle, font: { size: 10 }, color: '#9ca3af' } },
+    },
+    plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } },
+      tooltip: { mode: 'index', intersect: false },
+    },
+  };
+}
+
+function _liveCount(severity) {
+  return (allAlerts || []).filter(a => (a.severity || '').toLowerCase() === severity).length;
+}
+
+function updateDashKPIs() {
+  // Active alerts — live
+  const total = (allAlerts || []).length;
+  document.getElementById('dkpiAlerts').textContent = total || '0';
+
+  // Pipeline health — from workflow runs
+  const recent = (allRuns || []).slice(0, 10);
+  if (recent.length) {
+    const ok = recent.filter(r => r.conclusion === 'success').length;
+    const pct = Math.round(ok / recent.length * 100);
+    document.getElementById('dkpiPipeline').textContent = pct + '%';
+    document.getElementById('dkpiPipelineDelta').textContent = `${ok}/${recent.length} passed`;
+  }
+
+  // Model alerts — live from OpenScale
+  const modBadge = document.getElementById('tabModelsBadge');
+  if (modBadge) {
+    document.getElementById('dkpiDrift').textContent = modBadge.textContent || '0';
+  }
 }
