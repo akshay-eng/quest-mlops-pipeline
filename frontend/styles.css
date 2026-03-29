@@ -450,18 +450,17 @@ body {
   align-self: flex-start;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; border-bottom-left-radius: 2px;
-  padding: 12px 16px; display: flex; gap: 5px; align-items: center;
-  box-shadow: var(--shadow-sm);
+  padding: 12px 16px; display: flex; gap: 10px; align-items: center;
+  box-shadow: var(--shadow-sm); max-width: 80%;
 }
-.typing-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--text-muted); animation: typing 1.2s ease-in-out infinite;
+.typing-dot { display: none; }
+.investigation-text {
+  font-size: 13px; color: var(--text-primary); font-style: italic;
+  animation: investigatePulse 1.4s ease-in-out infinite;
 }
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing {
-  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-  40%           { transform: translateY(-4px); opacity: 1; }
+@keyframes investigatePulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
 }
 
 .chat-footer {
@@ -1264,3 +1263,97 @@ body {
 .ev-hist-meta  { display: flex; gap: 4px; flex-wrap: wrap; margin: 3px 0; }
 .ev-hist-id    { font-size: 10px; color: var(--text-light); font-family: monospace; }
 .ev-history-latest .ev-hist-time { color: #7c3aed; }
+
+/* ============================================================
+   SETTINGS TAB
+   ============================================================ */
+
+.settings-page-title {
+  font-size: 18px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.settings-page-sub {
+  font-size: 13px; color: var(--text-muted); margin-bottom: 24px;
+}
+
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.settings-card-header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px;
+  cursor: default;
+}
+.settings-card-icon {
+  width: 38px; height: 38px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; flex-shrink: 0;
+}
+.settings-card-title {
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+}
+.settings-card-sub {
+  font-size: 12px; color: var(--text-muted); margin-top: 2px;
+}
+.settings-card-body {
+  padding: 0 20px 20px;
+  border-top: 1px solid var(--border);
+}
+.settings-field {
+  margin-top: 14px;
+}
+.settings-row-2 {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.settings-label {
+  display: block; font-size: 12px; font-weight: 500;
+  color: var(--text-muted); margin-bottom: 5px;
+}
+.settings-input {
+  width: 100%; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; color: var(--text-primary);
+  background: var(--bg); outline: none;
+  box-sizing: border-box;
+  transition: border-color .15s;
+}
+.settings-input:focus { border-color: var(--accent); }
+.settings-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-primary); cursor: pointer;
+}
+.settings-test-btn {
+  margin-top: 14px;
+  padding: 7px 14px; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text-primary);
+  cursor: pointer; transition: background .15s;
+}
+.settings-test-btn:hover { background: var(--border); }
+.settings-test-result {
+  margin-left: 10px; font-size: 12px; font-weight: 500;
+  vertical-align: middle;
+}
+
+/* Toggle switch */
+.settings-toggle { margin-left: auto; position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.settings-toggle input { opacity: 0; width: 0; height: 0; }
+.settings-toggle-track {
+  position: absolute; inset: 0;
+  background: var(--border); border-radius: 22px;
+  cursor: pointer; transition: background .2s;
+}
+.settings-toggle-track::before {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; top: 3px; left: 3px;
+  transition: transform .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.settings-toggle input:checked + .settings-toggle-track { background: var(--accent); }
+.settings-toggle input:checked + .settings-toggle-track::before { transform: translateX(18px); }

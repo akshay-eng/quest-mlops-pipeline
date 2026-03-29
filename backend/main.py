@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import webhook, workflows, resolve, openscale, evidently_ai
+from routes import webhook, workflows, resolve, openscale, evidently_ai, watson
 
 app = FastAPI(title="WINGS Backend", version="1.0.0")
 
@@ -19,6 +19,7 @@ app.include_router(workflows.router, prefix="/api",     tags=["Workflows"])
 app.include_router(resolve.router,   prefix="/api",     tags=["Resolve"])
 app.include_router(openscale.router,    prefix="/api",     tags=["OpenScale"])
 app.include_router(evidently_ai.router, prefix="/api",     tags=["Evidently"])
+app.include_router(watson.router,      prefix="/api",     tags=["Watson"])
 
 @app.get("/health")
 def health():

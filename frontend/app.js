@@ -4,12 +4,12 @@
 // Workflows tab: FastAPI backend on port 8000
 // =============================================================================
 
-const API_BASE         = 'http://localhost:4000';
-const WF_API_BASE      = 'http://localhost:8000';
+const API_BASE         = 'http://localhost:8002';  // alertmanager Flask backend
+const WF_API_BASE      = 'http://localhost:8000';  // FastAPI backend
 const POLL_INTERVAL    = 10000;
 const WF_POLL_INTERVAL = 15000;
 const OS_POLL_INTERVAL = 60000;   // OpenScale — poll every 60s (API is slower)
-const EV_POLL_INTERVAL = 90000;   // Evidently — poll every 90s
+const EV_POLL_INTERVAL = 300000;  // Evidently — poll every 5 min (matches CronJob)
 
 let allAlerts      = [];
 let currentAlertId = null;
@@ -116,19 +116,22 @@ function switchTab(tab) {
   document.getElementById('tabWorkflows').classList.toggle('active',  tab === 'workflows');
   document.getElementById('tabModels').classList.toggle('active',     tab === 'models');
   document.getElementById('tabEvidently').classList.toggle('active',  tab === 'evidently');
+  document.getElementById('tabSettings').classList.toggle('active',   tab === 'settings');
 
   document.getElementById('incidentsView').style.display  = tab === 'incidents'  ? '' : 'none';
   document.getElementById('workflowsView').style.display  = tab === 'workflows'  ? '' : 'none';
   document.getElementById('modelsView').style.display     = tab === 'models'     ? '' : 'none';
   document.getElementById('evidentlyView').style.display  = tab === 'evidently'  ? '' : 'none';
+  document.getElementById('settingsView').style.display   = tab === 'settings'   ? '' : 'none';
 
   if (tab === 'workflows') fetchWorkflows();
   if (tab === 'models')    fetchDeployments();
   if (tab === 'evidently') fetchEvidently();
+  if (tab === 'settings')  loadSettings();
 }
 
 // ---------------------------------------------------------------------------
-// FETCH ALERTS (incidents tab)
+// FETCH ALERTS
 // ---------------------------------------------------------------------------
 async function fetchAlerts() {
   try {
@@ -138,24 +141,24 @@ async function fetchAlerts() {
     updateStats(allAlerts);
     renderAlerts(allAlerts);
     setOnline(true);
-    document.getElementById('tabIncidentsBadge').textContent = allAlerts.filter(a => a.alert_status !== 'resolved').length;
+    const firing = allAlerts.filter(a => a.status === 'active').length;
+    const badge  = document.getElementById('tabIncidentsBadge');
+    badge.textContent = firing;
+    badge.className   = 'tab-badge' + (firing > 0 ? ' tab-badge-red' : '');
   } catch {
     setOnline(false);
   }
 }
 
-function setOnline(online) {
-  document.getElementById('liveDot').classList.toggle('offline', !online);
-  document.getElementById('liveLabel').textContent = online ? 'Live' : 'Disconnected';
-}
+function setOnline(_online) { /* indicator removed */ }
 
 // ---------------------------------------------------------------------------
-// STATS (incidents)
+// STATS
 // ---------------------------------------------------------------------------
 function updateStats(alerts) {
   document.getElementById('statTotal').textContent       = alerts.length;
   document.getElementById('statCritical').textContent    = alerts.filter(a => a.severity === 'critical').length;
-  document.getElementById('statWarning').textContent     = alerts.filter(a => a.severity !== 'critical').length;
+  document.getElementById('statWarning').textContent     = alerts.filter(a => a.severity === 'warning').length;
   document.getElementById('statOccurrences').textContent = alerts.reduce((s, a) => s + (a.count || 1), 0);
 }
 
@@ -176,28 +179,29 @@ function renderAlerts(alerts) {
 }
 
 function buildRow(alert) {
-  const incident   = resolveIncident(alert);
-  const isFiring   = alert.alert_status !== 'resolved';
-  const multi      = (alert.count || 1) > 1;
-  const sev        = alert.severity || 'warning';
+  const sev   = alert.severity || 'warning';
+  const count = alert.count || 1;
+  const multi = count > 1;
+  const name  = alert.alertname || alert.title || 'Alert';
+  const desc  = alert.description || '';
+  const ts    = alert.starts_at || '';
 
   return `
-<div class="alert-row" onclick="openDetail('${alert.id}')">
+<div class="alert-row" onclick="openAlertDetail('${escHtml(alert.id)}')">
   <div class="col-severity">
     <span class="badge badge-${sev}">${sev}</span>
   </div>
   <div class="col-title">
-    <span class="alert-name">${incident.displayTitle}</span>
-    <span class="alert-desc">${escHtml(alert.description || alert.title)}</span>
+    <span class="alert-name">${escHtml(name)}</span>
+    <span class="alert-desc">${escHtml(desc.slice(0, 120))}${desc.length > 120 ? '…' : ''}</span>
   </div>
-  <div class="col-service">${incident.category}</div>
-  <div class="col-namespace">${alert.namespace || '—'}</div>
-  <div class="col-occurrences ${multi ? 'high' : ''}">${alert.count || 1}</div>
-  <div class="col-time">${formatRelative(alert.last_fired || alert.first_fired)}</div>
+  <div class="col-service">${escHtml(alert.namespace || '—')}</div>
+  <div class="col-namespace">${escHtml(alert.pod || alert.container || '—')}</div>
+  <div class="col-occurrences ${multi ? 'high' : ''}">${count}</div>
+  <div class="col-time">${formatRelative(ts)}</div>
   <div class="col-status">
-    <span class="badge badge-${isFiring ? 'critical' : 'success'}">
-      <span class="status-dot ${isFiring ? 'firing' : 'resolved'}"></span>
-      ${isFiring ? 'Firing' : 'Resolved'}
+    <span class="badge badge-critical">
+      <span class="status-dot firing"></span>Firing
     </span>
   </div>
 </div>`;
@@ -212,50 +216,50 @@ function filterAlerts() {
   const type = document.getElementById('typeFilter').value;
 
   const filtered = allAlerts.filter(a => {
-    const inc = resolveIncident(a);
     const matchQ = !q ||
+      (a.alertname || '').toLowerCase().includes(q) ||
       (a.title || '').toLowerCase().includes(q) ||
-      inc.displayTitle.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
-      (a.namespace || '').toLowerCase().includes(q);
+      (a.namespace || '').toLowerCase().includes(q) ||
+      (a.pod || '').toLowerCase().includes(q);
     return matchQ &&
       (!sev  || a.severity === sev) &&
-      (!type || a.incident_type === type);
+      (!type || (a.namespace || '') === type);
   });
 
   renderAlerts(filtered);
 }
 
 // ---------------------------------------------------------------------------
-// DETAIL MODAL
+// ALERT DETAIL MODAL
 // ---------------------------------------------------------------------------
-function openDetail(alertId) {
+function openAlertDetail(alertId) {
   const alert = allAlerts.find(a => a.id === alertId);
   if (!alert) return;
 
   currentAlertId = alertId;
   chatThreadId   = null;
 
-  const incident = resolveIncident(alert);
-  const isFiring = alert.alert_status !== 'resolved';
-  const sev      = alert.severity || 'warning';
-  const count    = alert.count || 1;
+  const sev   = alert.severity || 'warning';
+  const count = alert.count || 1;
+  const name  = alert.alertname || alert.title || 'Alert';
 
-  document.getElementById('detailTitle').textContent    = incident.displayTitle;
-  document.getElementById('detailSubtitle').textContent = `${incident.category} — Quest Diagnostics`;
+  // Build labels list from the labels object
+  const labelRows = Object.entries(alert.labels || {})
+    .map(([k, v]) => `<div class="detail-field"><div class="field-label">${escHtml(k)}</div><div class="field-value">${escHtml(v)}</div></div>`)
+    .join('');
+
+  document.getElementById('detailTitle').textContent    = escHtml(name);
+  document.getElementById('detailSubtitle').textContent = `Alertmanager — Quest Diagnostics K8s`;
 
   document.getElementById('detailContent').innerHTML = `
     <div class="detail-section">
-      <div class="section-label">Overview</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <span class="badge badge-${sev}">${sev}</span>
-        <span class="badge badge-${isFiring ? 'critical' : 'success'}">
-          <span class="status-dot ${isFiring ? 'firing' : 'resolved'}"></span>
-          ${isFiring ? 'Firing' : 'Resolved'}
-        </span>
-        ${alert.alertname ? `<span class="badge badge-neutral">${escHtml(alert.alertname)}</span>` : ''}
+        <span class="badge badge-critical"><span class="status-dot firing"></span>Firing</span>
+        ${count > 1 ? `<span class="badge badge-neutral">${count} occurrences</span>` : ''}
       </div>
-      <div style="font-size:13px;color:var(--text-muted);line-height:1.6">${escHtml(alert.description || alert.title)}</div>
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.6">${escHtml(alert.description || '—')}</div>
     </div>
 
     <div class="detail-section">
@@ -266,16 +270,16 @@ function openDetail(alertId) {
           <div class="field-value">${escHtml(alert.namespace || '—')}</div>
         </div>
         <div class="detail-field">
-          <div class="field-label">Pod / Service</div>
+          <div class="field-label">Pod</div>
           <div class="field-value">${escHtml(alert.pod || '—')}</div>
         </div>
         <div class="detail-field">
-          <div class="field-label">First Detected</div>
-          <div class="field-value">${formatFull(alert.first_fired)}</div>
+          <div class="field-label">Container</div>
+          <div class="field-value">${escHtml(alert.container || '—')}</div>
         </div>
         <div class="detail-field">
-          <div class="field-label">Last Fired</div>
-          <div class="field-value">${formatFull(alert.last_fired || alert.first_fired)}</div>
+          <div class="field-label">Started</div>
+          <div class="field-value">${formatFull(alert.starts_at)}</div>
         </div>
       </div>
     </div>
@@ -284,25 +288,20 @@ function openDetail(alertId) {
       <div class="section-label">Occurrences</div>
       <div class="occurrence-block">
         <div class="occurrence-num ${count > 1 ? 'high' : ''}">${count}</div>
-        <div class="occurrence-label">total occurrence${count !== 1 ? 's' : ''} — alert has fired ${count} time${count !== 1 ? 's' : ''} and is still ${isFiring ? 'active' : 'resolved'}</div>
+        <div class="occurrence-label">times this alert has fired (deduplicated)</div>
       </div>
     </div>
 
+    ${labelRows ? `
     <div class="detail-section">
-      <div class="section-label">Suggested Actions</div>
-      <div class="actions-list">
-        ${incident.suggestedActions.map((a, i) => `
-          <div class="action-row">
-            <span class="action-num">${i + 1}</span>
-            <span class="action-text">${escHtml(a)}</span>
-          </div>`).join('')}
-      </div>
-    </div>
+      <div class="section-label">Labels</div>
+      <div class="detail-grid">${labelRows}</div>
+    </div>` : ''}
 
-    ${alert.runbook ? `
+    ${alert.runbook_url ? `
     <div class="detail-section">
       <div class="section-label">Runbook</div>
-      <div class="runbook-block">${escHtml(alert.runbook)}</div>
+      <a href="${escHtml(alert.runbook_url)}" target="_blank" class="btn btn-ghost" style="font-size:12px">Open Runbook ↗</a>
     </div>` : ''}
   `;
 
@@ -310,14 +309,13 @@ function openDetail(alertId) {
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
   footer.innerHTML = `
-    <button class="btn btn-ai" onclick="openChat('${alert.id}')">
+    <button class="btn btn-ai" onclick="closeDetail(); openAlertChat('${escHtml(alert.id)}')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
       </svg>
-      Investigate with AI
+      Investigate &amp; Resolve with AI
     </button>
-    <button class="btn btn-ghost" onclick="dismissAlert('${alert.id}')">Dismiss</button>
+    <button class="btn btn-ghost" onclick="dismissAlert('${escHtml(alert.id)}')">Dismiss</button>
   `;
   document.getElementById('detailModal').appendChild(footer);
   document.getElementById('detailOverlay').classList.add('open');
@@ -343,44 +341,52 @@ async function dismissAlert(alertId) {
 }
 
 // ---------------------------------------------------------------------------
-// AI CHAT MODAL (incidents)
+// AI CHAT MODAL — Alert investigation
+// Agent: Quest SDLC Remediation Agent (2747d3ab-754e-4d03-85c2-1a023019ec6e)
 // ---------------------------------------------------------------------------
-function openChat(alertId) {
-  closeDetail();
+const REMEDIATION_AGENT_ID = '2747d3ab-754e-4d03-85c2-1a023019ec6e';
 
+function openAlertChat(alertId) {
   const alert = allAlerts.find(a => a.id === alertId);
   currentAlertId = alertId;
   chatThreadId   = null;
 
-  const incident = alert ? resolveIncident(alert) : null;
+  const name  = alert ? (alert.alertname || alert.title || 'Alert') : 'Alert';
+  const sev   = alert ? (alert.severity || 'warning').toUpperCase() : '';
+  const count = alert ? (alert.count || 1) : 1;
 
-  document.getElementById('chatAlertName').textContent =
-    incident ? incident.displayTitle : 'WatsonX Incident Assistant';
+  document.getElementById('chatAlertName').textContent = name;
 
   const ctx = document.getElementById('chatIncidentCtx');
   if (alert) {
-    const sev   = (alert.severity || 'warning').toUpperCase();
-    const count = alert.count || 1;
-    ctx.textContent =
-      `Context: ${alert.alertname || incident.displayTitle}  |  ${sev}  |  ${count} occurrence(s)  |  ${alert.namespace || '—'}`;
+    ctx.textContent = `${sev}  ·  ${count} occurrence(s)  ·  ${alert.namespace || '—'}  ·  ${alert.pod || '—'}`;
     ctx.classList.add('visible');
   } else {
     ctx.classList.remove('visible');
   }
 
   document.getElementById('chatMessages').innerHTML = '';
-
-  addAIMessage(
-    alert
-      ? `I have loaded the incident context for **${incident.displayTitle}**.\n\n` +
-        `This alert has fired **${alert.count || 1} time(s)**.\n\n` +
-        `You can ask me about the root cause, recommended remediation steps, or specific commands to run.`
-      : `I am your WatsonX incident assistant. Ask me about root cause, remediation, or runbook guidance.`
-  );
-
   document.getElementById('chatOverlay').classList.add('open');
-  document.getElementById('chatInput').focus();
+
+  // Auto-investigate immediately — send alert context as first message
+  if (alert) {
+    const autoPrompt =
+      `Investigate this Kubernetes alert and provide root cause analysis and remediation steps:\n\n` +
+      `Alert: ${alert.alertname || alert.title}\n` +
+      `Severity: ${alert.severity || 'warning'}\n` +
+      `Namespace: ${alert.namespace || '—'}\n` +
+      `Pod: ${alert.pod || '—'}\n` +
+      `Container: ${alert.container || '—'}\n` +
+      `Occurrences: ${alert.count || 1}\n` +
+      `Description: ${alert.description || '—'}\n` +
+      `Labels: ${JSON.stringify(alert.labels || {})}`;
+
+    _streamAgentResponse(autoPrompt, true);
+  }
 }
+
+// Keep backward compat
+function openChat(alertId) { openAlertChat(alertId); }
 
 function closeChat() {
   document.getElementById('chatOverlay').classList.remove('open');
@@ -390,67 +396,46 @@ function closeChatModal(e) {
   if (e.target === document.getElementById('chatOverlay')) closeChat();
 }
 
-async function sendMessage() {
-  const input = document.getElementById('chatInput');
-  const msg   = input.value.trim();
-  if (!msg) return;
-
-  input.value = '';
-  addUserMessage(msg);
-
+async function _streamAgentResponse(prompt, isAuto = false) {
   const typingEl = addTypingIndicator();
   document.getElementById('sendBtn').disabled = true;
-
-  const alert = allAlerts.find(a => a.id === currentAlertId);
-  let fullPrompt = msg;
-  if (alert && !chatThreadId) {
-    const incident = resolveIncident(alert);
-    fullPrompt =
-      `[Incident Context]\n` +
-      `Type: ${incident.displayTitle}\n` +
-      `Alert: ${alert.alertname || incident.displayTitle}\n` +
-      `Severity: ${alert.severity || 'warning'}\n` +
-      `Namespace: ${alert.namespace || '—'}\n` +
-      `Pod/Service: ${alert.pod || '—'}\n` +
-      `Occurrences: ${alert.count || 1}\n` +
-      `Description: ${alert.description || alert.title}\n\n` +
-      `[User Question]\n${msg}`;
-  }
+  document.getElementById('chatInput').disabled = true;
 
   try {
-    const res = await fetch(`${API_BASE}/api/generate-incident`, {
+    const res = await fetch(`${WF_API_BASE}/api/investigate`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ message: fullPrompt, thread_id: chatThreadId || null }),
+      body:    JSON.stringify({
+        message:   prompt,
+        thread_id: chatThreadId || null,
+        agent_id:  REMEDIATION_AGENT_ID,
+      }),
     });
 
     if (!res.ok || !res.body) throw new Error('Stream unavailable');
-
+    if (typingEl._interval) clearInterval(typingEl._interval);
     typingEl.remove();
 
     const msgEl = document.createElement('div');
     msgEl.className = 'msg msg-ai';
     appendMsg(msgEl);
 
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let   buffer  = '';
+    const reader   = res.body.getReader();
+    const decoder  = new TextDecoder();
+    let   buf      = '';
     let   fullText = '';
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) continue;
         const jsonStr = trimmed.slice(5).trim();
         if (!jsonStr || jsonStr === '[DONE]') continue;
-
         try {
           const chunk = JSON.parse(jsonStr);
           if (chunk.thread_id) chatThreadId = chunk.thread_id;
@@ -460,22 +445,32 @@ async function sendMessage() {
             document.getElementById('chatMessages').scrollTop =
               document.getElementById('chatMessages').scrollHeight;
           }
-        } catch { /* ignore malformed chunk */ }
+        } catch { /* ignore */ }
       }
     }
 
-    if (!fullText) {
-      msgEl.innerHTML = renderMarkdown('No response received. Please try again.');
-    }
+    if (!fullText) msgEl.innerHTML = renderMarkdown('No response received. Please try again.');
 
   } catch (err) {
+    if (typingEl._interval) clearInterval(typingEl._interval);
     typingEl.remove();
-    addAIMessage('Unable to reach the AI backend. Please ensure the server is running on port 4000.');
+    addAIMessage('Unable to reach the AI backend. Ensure alertmanager.py is running on port 8002.');
     console.error('Chat error:', err);
   } finally {
     document.getElementById('sendBtn').disabled = false;
+    document.getElementById('chatInput').disabled = false;
     document.getElementById('chatInput').focus();
   }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const msg   = input.value.trim();
+  if (!msg) return;
+
+  input.value = '';
+  addUserMessage(msg);
+  await _streamAgentResponse(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,13 +490,37 @@ function addAIMessage(text) {
   appendMsg(el);
 }
 
+const _investigationSteps = [
+  'Investigating...',
+  'Investigating......',
+  'Investigating.........',
+];
+
 function addTypingIndicator() {
   const el = document.createElement('div');
-  el.className = 'typing-indicator';
-  el.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+  el.className = 'typing-indicator investigation-indicator';
+
+  const textEl = document.createElement('span');
+  textEl.className = 'investigation-text';
+  textEl.textContent = _investigationSteps[0];
+  el.appendChild(textEl);
+
+  let step = 0;
+  el._interval = setInterval(() => {
+    step = (step + 1) % _investigationSteps.length;
+    textEl.textContent = _investigationSteps[step];
+  }, 1800);
+
   appendMsg(el);
   return el;
 }
+
+const _origTypingRemove = HTMLElement.prototype.remove;
+// Patch remove to clear the interval
+const _patchedRemove = function() {
+  if (this._interval) clearInterval(this._interval);
+  _origTypingRemove.call(this);
+};
 
 function appendMsg(el) {
   const c = document.getElementById('chatMessages');
@@ -916,11 +935,85 @@ function closeResolveModal(e) {
   if (e.target === document.getElementById('resolveOverlay')) closeResolve();
 }
 
+const WORKFLOW_AGENT_ID = '355ebf69-dee3-45e7-aae3-4fe9e4b9a914';
+
 async function startResolveStream(runId) {
   resolveAbort = new AbortController();
 
-  appendLogLine('info', 'WINGS agent initialising — connecting to IBM watsonx Orchestrate...');
+  appendLogLine('info', 'WINGS agent initialising — connecting to IBM Watson X Orchestrate...');
 
+  // Build prompt from run context
+  const run = allRuns.find(r => r.id === runId) || { id: runId };
+  const prompt =
+    `Investigate and resolve this failed GitHub Actions workflow run:\n\n` +
+    `Run ID: ${runId}\n` +
+    `Workflow: ${run.name || '—'}\n` +
+    `Branch: ${run.branch || '—'}\n` +
+    `Commit: ${run.commit_sha || '—'}\n` +
+    `Conclusion: ${run.conclusion || 'failure'}\n` +
+    `URL: ${run.html_url || '—'}\n\n` +
+    `Please identify the root cause, suggest remediation steps, and if possible trigger a fix.`;
+
+  try {
+    const res = await fetch(`${WF_API_BASE}/api/investigate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal:  resolveAbort.signal,
+      body: JSON.stringify({
+        message:   prompt,
+        thread_id: null,
+        agent_id:  WORKFLOW_AGENT_ID,
+      }),
+    });
+
+    if (!res.ok) {
+      appendLogLine('error', `Backend error: HTTP ${res.status}`);
+      setResolveDone(false);
+      return;
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   fullText = '';
+
+    // Create a live log entry that we update as tokens stream in
+    appendLogLine('running', 'Agent is analysing...');
+    const logEl = document.getElementById('resolveLog').lastElementChild;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const raw = trimmed.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(raw);
+          if (chunk.text) {
+            fullText += chunk.text;
+            if (logEl) logEl.querySelector('.log-msg').innerHTML = renderMarkdown(fullText);
+            document.getElementById('resolveLog').scrollTop = document.getElementById('resolveLog').scrollHeight;
+          }
+          if (chunk.done) { setResolveDone(true); return; }
+        } catch { /* ignore */ }
+      }
+    }
+
+    setResolveDone(true);
+    return;
+
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    appendLogLine('error', `Stream error: ${err.message}`);
+    appendLogLine('info', 'Falling back to simulation...');
+  }
+
+  // Fallback simulation if backend unreachable
   try {
     const res = await fetch(`${WF_API_BASE}/api/workflows/${runId}/resolve`, {
       method: 'POST',
@@ -1556,205 +1649,166 @@ function formatRelative(iso) {
 // EVIDENTLY AI TAB
 // =============================================================================
 
-let _evSnapshots = [];
-let _evLatest    = null;
-
 async function fetchEvidently() {
+  const loading = document.getElementById('evLoadingState');
+  const errEl   = document.getElementById('evErrorState');
+  const frame   = document.getElementById('evReportFrame');
+
+  loading.style.display = '';
+  errEl.style.display   = 'none';
+  frame.style.display   = 'none';
+
   try {
-    // Fetch both endpoints in parallel
-    const [listRes, latestRes] = await Promise.all([
-      fetch(`${WF_API_BASE}/api/evidently/reports`),
-      fetch(`${WF_API_BASE}/api/evidently/latest`),
-    ]);
+    const res  = await fetch(`${WF_API_BASE}/api/evidently/latest`);
+    const data = await res.json();
 
-    if (!listRes.ok || !latestRes.ok) throw new Error(`HTTP ${listRes.status}/${latestRes.status}`);
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
 
-    const listData   = await listRes.json();
-    const latestData = await latestRes.json();
+    // Stats row
+    const drift = data.drift || {};
+    document.getElementById('evStatDrifted').textContent = drift.n_drifted != null
+      ? `${drift.n_drifted} / ${drift.n_total}` : '—';
+    document.getElementById('evStatTotal').textContent = drift.n_total || '—';
+    document.getElementById('evStatUpdated').textContent = formatRelative(data.timestamp);
+    document.getElementById('evModelVersion').textContent = `v${data.version || '—'}`;
 
-    _evSnapshots = listData.snapshots || [];
-    _evLatest    = latestData;
+    const driftCard = document.getElementById('evStatDriftCard');
+    const driftEl   = document.getElementById('evStatDrift');
+    if (drift.dataset_drift === true) {
+      driftEl.textContent  = 'Drifted';
+      driftCard.className  = 'stat-card stat-critical';
+    } else {
+      driftEl.textContent  = 'Stable';
+      driftCard.className  = 'stat-card';
+    }
 
-    document.getElementById('evLoadingState').style.display = 'none';
-    document.getElementById('evErrorState').style.display   = 'none';
-    document.getElementById('evContent').style.display      = '';
-
-    _renderEvidentlyAll();
-
-    // Tab badge — show drifted feature count
-    const nDrifted = (_evLatest.drift || {}).n_drifted || 0;
+    // Tab badge
+    const nDrifted = drift.n_drifted || 0;
     const badge    = document.getElementById('tabEvidentlyBadge');
     badge.textContent = nDrifted;
     badge.className   = 'tab-badge' + (nDrifted > 0 ? ' tab-badge-red' : '');
 
+    // Show iframe — reload to get latest HTML report
+    loading.style.display = 'none';
+    frame.src = `${WF_API_BASE}/api/evidently/report?t=${Date.now()}`;
+    frame.style.display = '';
+
   } catch (err) {
     console.warn('Evidently fetch failed:', err.message);
-    document.getElementById('evLoadingState').style.display = 'none';
-    document.getElementById('evContent').style.display      = 'none';
-    document.getElementById('evErrorState').style.display   = '';
-    document.getElementById('evErrorState').innerHTML = `
+    loading.style.display = 'none';
+    errEl.style.display   = '';
+    errEl.innerHTML = `
       <div class="ev-error-inner">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
         <div>
-          <div style="font-weight:600;margin-bottom:4px">Cannot reach Evidently backend</div>
-          <div style="color:var(--text-muted);font-size:12px">${escHtml(err.message)} — ensure FastAPI is running with EVIDENTLY_API_KEY set</div>
-        </div>
-      </div>`;
-  }
-}
-
-function _renderEvidentlyAll() {
-  if (!_evLatest) return;
-  const drift   = _evLatest.drift          || {};
-  const cls     = _evLatest.classification || {};
-  const features= _evLatest.features       || [];
-
-  // ── Stats row ──────────────────────────────────────────────────────────────
-  document.getElementById('evStatReports').textContent  = _evSnapshots.length;
-  document.getElementById('evStatDrifted').textContent  =
-    drift.n_drifted != null ? `${drift.n_drifted}/${drift.n_total}` : '—';
-  document.getElementById('evStatF1').textContent       =
-    cls.f1 != null ? (cls.f1 * 100).toFixed(1) + '%' : '—';
-
-  const driftCard = document.getElementById('evStatDriftCard');
-  const driftEl   = document.getElementById('evStatDrift');
-  if (drift.dataset_drift === true) {
-    driftEl.textContent    = 'Drifted';
-    driftCard.className    = 'stat-card stat-critical';
-  } else if (drift.dataset_drift === false) {
-    driftEl.textContent    = 'Stable';
-    driftCard.className    = 'stat-card';
-  } else {
-    driftEl.textContent    = '—';
-    driftCard.className    = 'stat-card';
-  }
-
-  // ── Project ID strip ───────────────────────────────────────────────────────
-  document.getElementById('evProjectId').textContent =
-    'Project: ' + (_evLatest.metadata?.model || 'drug-test-classifier') +
-    '  ·  v' + (_evLatest.metadata?.version || '—');
-
-  // ── Report header ─────────────────────────────────────────────────────────
-  document.getElementById('evReportHeader').innerHTML = `
-    <div class="ev-report-meta">
-      <div class="ev-report-time">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-        </svg>
-        Latest report: <strong>${formatRelative(_evLatest.timestamp)}</strong>
-        <span class="ev-ts-full">${formatFull(_evLatest.timestamp)}</span>
-      </div>
-      ${_evLatest.tags && _evLatest.tags.length ? `
-      <div class="ev-tags">
-        ${_evLatest.tags.map(t => `<span class="ev-tag">${escHtml(t)}</span>`).join('')}
-      </div>` : ''}
-      <div class="ev-drift-pill ${drift.dataset_drift ? 'drifted' : 'stable'}">
-        ${drift.dataset_drift
-          ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Dataset drift detected`
-          : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> No dataset drift`}
-      </div>
-    </div>`;
-
-  // ── Feature drift table ────────────────────────────────────────────────────
-  _renderDriftTable(features);
-
-  // ── Classification metrics ─────────────────────────────────────────────────
-  _renderClassMetrics(cls);
-
-  // ── Report history ─────────────────────────────────────────────────────────
-  _renderEvHistory(_evSnapshots);
-}
-
-function _renderDriftTable(features) {
-  const el = document.getElementById('evDriftTable');
-  if (!features.length) {
-    el.innerHTML = '<div class="ev-empty-msg">No feature drift data — upload a report first</div>';
-    return;
-  }
-
-  const rows = features.map(f => {
-    const score   = f.drift_score || 0;
-    const pct     = Math.min(Math.round(score * 100), 100);
-    const barCls  = f.drifted ? 'ev-bar-drifted' : 'ev-bar-ok';
-    const badgeCls= f.drifted ? 'badge-critical' : 'badge-success';
-    const label   = f.drifted ? 'Drifted' : 'Stable';
-    return `
-      <div class="ev-drift-row">
-        <div class="ev-feat-name" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
-        <div class="ev-bar-wrap">
-          <div class="ev-bar ${barCls}" style="width:${pct}%"></div>
-        </div>
-        <div class="ev-score-val">${score.toFixed(3)}</div>
-        <span class="badge ${badgeCls}" style="font-size:10px;padding:2px 8px">${label}</span>
-        <span class="ev-test-name">${escHtml(f.stat_test || '')}</span>
-      </div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div class="ev-drift-header">
-      <span>Feature</span><span>Drift Score</span><span></span><span>Status</span><span>Test</span>
-    </div>
-    ${rows}`;
-}
-
-function _renderClassMetrics(cls) {
-  const el = document.getElementById('evClassMetrics');
-  if (!cls || Object.keys(cls).length === 0) {
-    el.innerHTML = '<div class="ev-empty-msg">No classification metrics — add ground truth labels to your predictions</div>';
-    return;
-  }
-
-  const metrics = [
-    { label: 'Accuracy',  value: cls.accuracy,  color: '#10b981' },
-    { label: 'F1 Score',  value: cls.f1,        color: '#6366f1' },
-    { label: 'Precision', value: cls.precision,  color: '#f59e0b' },
-    { label: 'Recall',    value: cls.recall,     color: '#3b82f6' },
-  ];
-
-  el.innerHTML = `
-    <div class="ev-class-grid">
-      ${metrics.map(m => {
-        const pct = m.value != null ? Math.round(m.value * 100) : null;
-        const cls2= pct != null && pct < 60 ? 'ev-metric-low' : pct != null && pct < 80 ? 'ev-metric-mid' : 'ev-metric-high';
-        return `
-          <div class="ev-metric-card ${cls2}">
-            <div class="ev-metric-val" style="color:${m.color}">
-              ${pct != null ? pct + '%' : '—'}
-            </div>
-            <div class="ev-metric-label">${m.label}</div>
-            ${pct != null ? `
-            <div class="ev-metric-bar-wrap">
-              <div class="ev-metric-bar" style="width:${pct}%;background:${m.color}20;border-right:2px solid ${m.color}"></div>
-            </div>` : ''}
-          </div>`;
-      }).join('')}
-    </div>`;
-}
-
-function _renderEvHistory(snapshots) {
-  const el = document.getElementById('evHistory');
-  if (!snapshots.length) {
-    el.innerHTML = '<div class="ev-empty-msg">No reports yet — trigger the GitHub Actions workflow to upload the first report</div>';
-    return;
-  }
-
-  el.innerHTML = snapshots.slice(0, 10).map((s, i) => {
-    const tags   = (s.tags || []).slice(0, 2);
-    const isLatest = i === 0;
-    return `
-      <div class="ev-history-row ${isLatest ? 'ev-history-latest' : ''}">
-        <div class="ev-hist-dot ${isLatest ? 'latest' : ''}"></div>
-        <div class="ev-hist-body">
-          <div class="ev-hist-time">${formatRelative(s.timestamp)}</div>
-          <div class="ev-hist-meta">
-            ${tags.map(t => `<span class="ev-tag">${escHtml(t)}</span>`).join('')}
-            ${s.metadata?.version ? `<span class="ev-tag">v${escHtml(s.metadata.version)}</span>` : ''}
-            ${isLatest ? '<span class="ev-tag ev-tag-latest">latest</span>' : ''}
+          <div style="font-weight:600;margin-bottom:4px">No drift report yet</div>
+          <div style="color:var(--text-muted);font-size:12px">
+            Run <code>python src/monitor_evidently.py</code> locally, or trigger the K8s CronJob.<br/>
+            ${escHtml(err.message)}
           </div>
-          <div class="ev-hist-id">${s.id.slice(0, 8)}…</div>
         </div>
       </div>`;
-  }).join('')}`;
+  }
+}
+
+
+// =============================================================================
+// SETTINGS TAB
+// =============================================================================
+
+const SETTINGS_KEY = 'wings_alert_settings';
+
+const SETTINGS_FIELDS = [
+  'slackEnabled','slackWebhook','slackChannel','slackCritical','slackWarning','slackInfo',
+  'emailEnabled','emailHost','emailPort','emailUser','emailPass','emailTo',
+  'pdEnabled','pdKey','pdCritical','pdWarning',
+  'webhookEnabled','webhookUrl','webhookAuth',
+];
+
+function saveSettings() {
+  const data = {};
+  SETTINGS_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    data[id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+}
+
+function loadSettings() {
+  const raw = localStorage.getItem(SETTINGS_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    SETTINGS_FIELDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el || !(id in data)) return;
+      if (el.type === 'checkbox') el.checked = data[id];
+      else el.value = data[id];
+    });
+  } catch { /* ignore */ }
+}
+
+function _setTestResult(elId, ok, msg) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok ? '#10b981' : '#ef4444';
+  setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+function testSlack() {
+  const url = document.getElementById('slackWebhook').value.trim();
+  if (!url) return _setTestResult('slackTestResult', false, 'Enter a webhook URL first.');
+  _setTestResult('slackTestResult', true, 'Sending test message...');
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: ':white_check_mark: *WINGS Platform* — Slack alert forwarding connected successfully.' }),
+  })
+    .then(r => _setTestResult('slackTestResult', r.ok, r.ok ? 'Connected successfully.' : `Error: HTTP ${r.status}`))
+    .catch(e => _setTestResult('slackTestResult', false, `Failed: ${e.message}`));
+}
+
+function testEmail() {
+  _setTestResult('emailTestResult', true, 'Email test requires backend support — settings saved.');
+}
+
+function testPagerDuty() {
+  const key = document.getElementById('pdKey').value.trim();
+  if (!key) return _setTestResult('pdTestResult', false, 'Enter an integration key first.');
+  _setTestResult('pdTestResult', true, 'Sending test event...');
+  fetch('https://events.pagerduty.com/v2/enqueue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      routing_key: key,
+      event_action: 'trigger',
+      payload: {
+        summary: 'WINGS Platform — PagerDuty test alert',
+        severity: 'info',
+        source: 'wings-platform',
+      },
+    }),
+  })
+    .then(r => r.json().then(d => _setTestResult('pdTestResult', r.ok, r.ok ? `Connected. Dedup key: ${d.dedup_key}` : `Error: ${d.message}`)))
+    .catch(e => _setTestResult('pdTestResult', false, `Failed: ${e.message}`));
+}
+
+function testWebhook() {
+  const url = document.getElementById('webhookUrl').value.trim();
+  const auth = document.getElementById('webhookAuth').value.trim();
+  if (!url) return _setTestResult('webhookTestResult', false, 'Enter a URL first.');
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth) headers['Authorization'] = auth;
+  _setTestResult('webhookTestResult', true, 'Sending test payload...');
+  fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ source: 'wings-platform', event: 'test', message: 'Webhook connection test from WINGS.' }),
+  })
+    .then(r => _setTestResult('webhookTestResult', r.ok, r.ok ? 'Connected successfully.' : `Error: HTTP ${r.status}`))
+    .catch(e => _setTestResult('webhookTestResult', false, `Failed: ${e.message}`));
 }

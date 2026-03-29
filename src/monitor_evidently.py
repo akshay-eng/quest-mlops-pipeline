@@ -1,14 +1,10 @@
 """
-Evidently AI Cloud — Model Monitoring Reporter
-Reads real predictions from LOG_PATH and uploads a DataDrift + Classification
-report to Evidently Cloud. Falls back to synthetic data if log is absent.
+Evidently AI — Local Model Monitoring
+Reads predictions from LOG_PATH, runs DataDrift report,
+saves HTML report + metrics JSON to OUTPUT_DIR.
 
-Usage:
-  pip install evidently pandas
-  EVIDENTLY_API_KEY=<token> python monitor_evidently.py
-
-GitHub Actions / K8s CronJob:
-  Set env vars: EVIDENTLY_API_KEY, EVIDENTLY_PROJECT_ID, LOG_PATH
+K8s CronJob mounts the PVC at /data — both input and output go there.
+Backend serves /data/drift_metrics.json and /data/drift_report.html.
 """
 
 import os
@@ -18,11 +14,9 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-EVIDENTLY_API_KEY    = os.environ.get("EVIDENTLY_API_KEY", "")
-EVIDENTLY_PROJECT_ID = os.environ.get("EVIDENTLY_PROJECT_ID", "019d38af-88af-77a3-b6f0-ce8bb837307c")
-EVIDENTLY_URL        = os.environ.get("EVIDENTLY_URL", "https://app.evidently.cloud")
-LOG_PATH             = os.environ.get("LOG_PATH", "/data/predictions.jsonl")
-REFERENCE_PATH       = os.environ.get("REFERENCE_PATH", "data/reference.jsonl")
+LOG_PATH       = os.environ.get("LOG_PATH",       "/data/predictions.jsonl")
+REFERENCE_PATH = os.environ.get("REFERENCE_PATH", "/app/data/reference.jsonl")
+OUTPUT_DIR     = os.environ.get("OUTPUT_DIR",     "/data")
 
 MODEL_NAME    = "drug-test-classifier"
 MODEL_VERSION = os.environ.get("GITHUB_SHA", "local")[:7]
@@ -30,10 +24,6 @@ MODEL_VERSION = os.environ.get("GITHUB_SHA", "local")[:7]
 FEATURE_NAMES = ["age", "test_type_code", "collection_hour",
                  "days_since_hire", "panel_size", "specimen_type"]
 
-
-# ---------------------------------------------------------------------------
-# Load reference distribution (saved by train_simple.py at build time)
-# ---------------------------------------------------------------------------
 
 def _load_reference() -> pd.DataFrame:
     if os.path.exists(REFERENCE_PATH):
@@ -48,29 +38,20 @@ def _load_reference() -> pd.DataFrame:
             print(f"[evidently] Loaded {len(records)} reference rows from {REFERENCE_PATH}")
             return pd.DataFrame(records)
 
-    # Fallback: synthetic reference
     print("[evidently] Reference file not found — using synthetic reference")
     random.seed(42)
-    n = 500
     rows = []
-    for _ in range(n):
+    for _ in range(500):
         rows.append({
-            "age":             random.uniform(18, 65),
-            "test_type_code":  random.randint(1, 7),
-            "collection_hour": random.randint(6, 18),
-            "days_since_hire": random.uniform(30, 3650),
-            "panel_size":      random.randint(5, 20),
-            "specimen_type":   random.randint(0, 2),
-            "target":          random.randint(0, 1),
-            "prediction":      random.randint(0, 1),
-            "prediction_proba": random.uniform(0.3, 0.9),
+            "age":              random.uniform(18, 65),
+            "test_type_code":   random.randint(1, 7),
+            "collection_hour":  random.randint(6, 18),
+            "days_since_hire":  random.uniform(30, 3650),
+            "panel_size":       random.randint(5, 20),
+            "specimen_type":    random.randint(0, 2),
         })
     return pd.DataFrame(rows)
 
-
-# ---------------------------------------------------------------------------
-# Load current batch from real prediction log (or synthetic fallback)
-# ---------------------------------------------------------------------------
 
 def _load_current() -> pd.DataFrame:
     if os.path.exists(LOG_PATH):
@@ -83,93 +64,100 @@ def _load_current() -> pd.DataFrame:
                     pass
         if records:
             print(f"[evidently] Loaded {len(records)} live predictions from {LOG_PATH}")
-            df = pd.DataFrame(records)
-            # Rename prediction_proba to match column mapping if needed
-            return df
+            return pd.DataFrame(records)
 
-    # Fallback: synthetic current with injected drift
-    print(f"[evidently] No prediction log found at {LOG_PATH} — using synthetic current batch")
+    print(f"[evidently] No log at {LOG_PATH} — using synthetic drifted batch")
     random.seed(int(datetime.now(timezone.utc).timestamp()) % 9999)
-    n = 200
     rows = []
-    for _ in range(n):
+    for _ in range(200):
         rows.append({
-            "age":             random.uniform(18, 32),        # younger — drifted
-            "test_type_code":  random.randint(1, 7),
-            "collection_hour": random.randint(13, 18),        # later hours — drifted
-            "days_since_hire": random.uniform(30, 1000),      # newer employees — drifted
-            "panel_size":      random.randint(5, 20),
-            "specimen_type":   random.randint(0, 2),
-            "target":          random.randint(0, 1),
-            "prediction":      random.randint(0, 1),
-            "prediction_proba": random.uniform(0.25, 0.95),
+            "age":              random.uniform(18, 32),       # drifted younger
+            "test_type_code":   random.randint(1, 7),
+            "collection_hour":  random.randint(13, 18),       # drifted later
+            "days_since_hire":  random.uniform(30, 1000),     # drifted newer hires
+            "panel_size":       random.randint(5, 20),
+            "specimen_type":    random.randint(0, 2),
         })
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# Upload report to Evidently Cloud
-# ---------------------------------------------------------------------------
-
-def upload_report():
-    if not EVIDENTLY_API_KEY:
-        print("[evidently] EVIDENTLY_API_KEY not set — skipping upload.")
-        return False
-
+def run():
     try:
         from evidently import ColumnMapping
         from evidently.report import Report
-        from evidently.metric_preset import DataDriftPreset, ClassificationPreset
-        from evidently.ui.workspace.cloud import CloudWorkspace
-    except ImportError:
-        print("[evidently] Package not installed — run: pip install evidently")
+        from evidently.metric_preset import DataDriftPreset
+    except ImportError as e:
+        print(f"[evidently] Import error: {e}")
         return False
 
     reference = _load_reference()
     current   = _load_current()
 
-    # Ensure common columns
-    common_cols = FEATURE_NAMES + ["target", "prediction", "prediction_proba"]
-    reference = reference[[c for c in common_cols if c in reference.columns]]
-    current   = current[[c for c in common_cols if c in current.columns]]
+    feat_cols = [c for c in FEATURE_NAMES if c in reference.columns and c in current.columns]
+    reference = reference[feat_cols]
+    current   = current[feat_cols]
 
     column_mapping = ColumnMapping(
-        target="target",
-        prediction="prediction",
-        numerical_features=["age", "collection_hour", "days_since_hire", "panel_size"],
-        categorical_features=["test_type_code", "specimen_type"],
+        numerical_features  = ["age", "collection_hour", "days_since_hire", "panel_size"],
+        categorical_features= ["test_type_code", "specimen_type"],
     )
 
-    report = Report(
-        metrics=[
-            DataDriftPreset(),
-            ClassificationPreset(),
-        ],
-        metadata={
-            "model":   MODEL_NAME,
-            "version": MODEL_VERSION,
-        },
-        tags=[MODEL_NAME, "quest-diagnostics", "k8s"],
-    )
-    report.run(
-        reference_data=reference,
-        current_data=current,
-        column_mapping=column_mapping,
-    )
+    report = Report(metrics=[DataDriftPreset()])
+    report.run(reference_data=reference, current_data=current, column_mapping=column_mapping)
 
-    print(f"[evidently] Connecting to {EVIDENTLY_URL} ...")
-    ws = CloudWorkspace(token=EVIDENTLY_API_KEY, url=EVIDENTLY_URL)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print(f"[evidently] Uploading to project {EVIDENTLY_PROJECT_ID} ...")
-    ws.add_report(EVIDENTLY_PROJECT_ID, report)
+    # 1) Save full interactive HTML report
+    html_path = os.path.join(OUTPUT_DIR, "drift_report.html")
+    report.save_html(html_path)
+    print(f"[evidently] HTML report saved to {html_path}")
 
-    print(f"[evidently] Report uploaded → {EVIDENTLY_URL}/projects/{EVIDENTLY_PROJECT_ID}")
+    # 2) Extract key metrics and save as JSON for the dashboard
+    metrics_path = os.path.join(OUTPUT_DIR, "drift_metrics.json")
+    try:
+        d        = report.as_dict()
+        features = []
+        drift    = {}
+        for metric in d.get("metrics", []):
+            mtype  = metric.get("metric", "")
+            result = metric.get("result", {})
+            if "DatasetDriftMetric" in mtype:
+                drift = {
+                    "dataset_drift": result.get("dataset_drift", False),
+                    "share_drifted": round(result.get("share_drifted_columns", 0), 4),
+                    "n_drifted":     result.get("number_of_drifted_columns", 0),
+                    "n_total":       result.get("number_of_columns", 0),
+                }
+                for col, data in result.get("drift_by_columns", {}).items():
+                    features.append({
+                        "name":        col,
+                        "drift_score": round(float(data.get("drift_score", 0)), 4),
+                        "drifted":     bool(data.get("drift_detected", False)),
+                        "stat_test":   data.get("stattest_name", ""),
+                        "threshold":   data.get("stattest_threshold", 0.05),
+                    })
+        features.sort(key=lambda f: (-int(f["drifted"]), -f["drift_score"]))
+        output = {
+            "model":      MODEL_NAME,
+            "version":    MODEL_VERSION,
+            "timestamp":  datetime.now(timezone.utc).isoformat(),
+            "drift":      drift,
+            "features":   features,
+            "report_available": True,
+        }
+        with open(metrics_path, "w") as f:
+            json.dump(output, f, indent=2)
+        print(f"[evidently] Metrics JSON saved to {metrics_path}")
+    except Exception as e:
+        print(f"[evidently] Metrics extraction error: {e}")
+
+    print("[evidently] Done.")
     return True
 
 
 if __name__ == "__main__":
     print(f"[evidently] Model: {MODEL_NAME}  Version: {MODEL_VERSION}")
-    success = upload_report()
+    success = run()
     if not success:
         print("[evidently] Monitoring step skipped.")
     exit(0)

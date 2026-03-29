@@ -22,12 +22,7 @@
           <div class="brand-sub">WINGS Platform</div>
         </div>
       </div>
-      <div class="header-right">
-        <div class="live-indicator" id="connectionStatus">
-          <span class="live-dot" id="liveDot"></span>
-          <span id="liveLabel">Live</span>
-        </div>
-      </div>
+      <div class="header-right"></div>
     </div>
   </header>
 
@@ -39,7 +34,7 @@
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
           <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
         </svg>
-        Incidents
+        Alerts
         <span class="tab-badge" id="tabIncidentsBadge">0</span>
       </button>
       <button class="tab-btn" id="tabWorkflows" onclick="switchTab('workflows')">
@@ -59,10 +54,17 @@
       </button>
       <button class="tab-btn" id="tabEvidently" onclick="switchTab('evidently')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
         </svg>
-        Evidently AI
+        WINGS AI
         <span class="tab-badge" id="tabEvidentlyBadge">0</span>
+      </button>
+      <button class="tab-btn" id="tabSettings" onclick="switchTab('settings')" style="margin-left:auto">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
       </button>
     </div>
   </nav>
@@ -108,12 +110,11 @@
             <option value="warning">Warning</option>
           </select>
           <select class="filter-select" id="typeFilter" onchange="filterAlerts()">
-            <option value="">All Types</option>
-            <option value="pipeline_failure">Pipeline Failure</option>
-            <option value="api_connection_issue">API Connection</option>
-            <option value="openscale_outage">OpenScale Outage</option>
-            <option value="evaluation_failure">Evaluation Failure</option>
-            <option value="data_quality_issue">Data Quality</option>
+            <option value="">All Namespaces</option>
+            <option value="quest-mlops">quest-mlops</option>
+            <option value="quest-diagnostics">quest-diagnostics</option>
+            <option value="monitoring">monitoring</option>
+            <option value="kube-system">kube-system</option>
           </select>
         </div>
       </div>
@@ -121,11 +122,11 @@
       <!-- Table header -->
       <div class="table-header">
         <div class="col-severity">Severity</div>
-        <div class="col-title">Incident</div>
-        <div class="col-service">Service</div>
-        <div class="col-namespace">Namespace</div>
+        <div class="col-title">Alert</div>
+        <div class="col-service">Namespace</div>
+        <div class="col-namespace">Pod / Container</div>
         <div class="col-occurrences">Occurrences</div>
-        <div class="col-time">Last Fired</div>
+        <div class="col-time">Started</div>
         <div class="col-status">Status</div>
       </div>
 
@@ -137,8 +138,8 @@
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
           </div>
-          <div class="empty-title">No Active Incidents</div>
-          <div class="empty-sub">Monitoring active. Waiting for Prometheus alerts.</div>
+          <div class="empty-title">No Active Alerts</div>
+          <div class="empty-sub">All clear. Alertmanager is connected and monitoring.</div>
         </div>
       </div>
     </main>
@@ -464,10 +465,6 @@
 
     <!-- STATS -->
     <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-value" id="evStatReports">—</div>
-        <div class="stat-label">Reports Uploaded</div>
-      </div>
       <div class="stat-card" id="evStatDriftCard">
         <div class="stat-value" id="evStatDrift">—</div>
         <div class="stat-label">Drift Status</div>
@@ -477,19 +474,23 @@
         <div class="stat-label">Features Drifted</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="evStatF1">—</div>
-        <div class="stat-label">F1 Score</div>
+        <div class="stat-value" id="evStatTotal">—</div>
+        <div class="stat-label">Features Monitored</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="evStatUpdated">—</div>
+        <div class="stat-label">Last Updated</div>
       </div>
     </div>
 
-    <main class="main">
-      <div class="toolbar">
+    <main class="main" style="padding:0">
+      <div class="toolbar" style="padding:12px 20px">
         <div class="toolbar-left">
           <div class="ev-powered-by">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            Evidently AI Cloud
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            WINGS AI — drug-test-classifier
           </div>
-          <span class="ev-project-id" id="evProjectId"></span>
+          <span class="ev-model-tag" id="evModelVersion"></span>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-ghost" onclick="fetchEvidently()" style="display:flex;align-items:center;gap:6px;font-size:12px">
@@ -498,64 +499,179 @@
             </svg>
             Refresh
           </button>
-          <a class="btn btn-ghost" href="https://app.evidently.cloud/projects/019d38af-88af-77a3-b6f0-ce8bb837307c" target="_blank" style="font-size:12px">
-            Open in Evidently ↗
-          </a>
         </div>
       </div>
 
-      <!-- LOADING / ERROR STATE -->
+      <!-- Loading / error -->
       <div id="evLoadingState" class="ev-loading-state">
         <div class="os-loading-spinner"></div>
-        <span>Connecting to Evidently Cloud...</span>
+        <span>Loading drift report...</span>
       </div>
       <div id="evErrorState" class="ev-error-state" style="display:none"></div>
 
-      <!-- MAIN CONTENT (hidden until data loads) -->
-      <div id="evContent" style="display:none">
-
-        <!-- Latest report header -->
-        <div class="ev-report-header" id="evReportHeader"></div>
-
-        <!-- Two-column layout: drift table + metrics -->
-        <div class="ev-layout">
-
-          <!-- LEFT: Feature Drift Table -->
-          <div class="ev-panel">
-            <div class="ev-panel-title">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              Data Drift — Feature Analysis
-            </div>
-            <div id="evDriftTable" class="ev-drift-table"></div>
-          </div>
-
-          <!-- RIGHT: Classification + History -->
-          <div class="ev-side">
-
-            <!-- Classification Quality -->
-            <div class="ev-panel">
-              <div class="ev-panel-title">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                Classification Quality
-              </div>
-              <div id="evClassMetrics" class="ev-class-metrics"></div>
-            </div>
-
-            <!-- Report History -->
-            <div class="ev-panel">
-              <div class="ev-panel-title">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Report History
-              </div>
-              <div id="evHistory" class="ev-history"></div>
-            </div>
-
-          </div>
-        </div>
-      </div><!-- /evContent -->
+      <!-- Evidently HTML report in iframe -->
+      <iframe id="evReportFrame"
+              src="/api/evidently/report"
+              style="display:none;width:100%;height:calc(100vh - 230px);border:none;background:#fff">
+      </iframe>
 
     </main>
   </div><!-- /evidentlyView -->
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SETTINGS VIEW
+  ════════════════════════════════════════════════════════════ -->
+  <div id="settingsView" style="display:none">
+    <main class="main" style="max-width:760px;margin:0 auto;padding:28px 24px">
+
+      <div class="settings-page-title">Alert Forwarding &amp; Integrations</div>
+      <div class="settings-page-sub">Configure where alerts are forwarded when they fire. Settings are saved locally in your browser.</div>
+
+      <!-- SLACK -->
+      <div class="settings-card">
+        <div class="settings-card-header">
+          <div class="settings-card-icon" style="background:#4a154b">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
+          </div>
+          <div>
+            <div class="settings-card-title">Slack</div>
+            <div class="settings-card-sub">Forward alerts to a Slack channel via Incoming Webhook</div>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="slackEnabled" onchange="saveSettings()">
+            <span class="settings-toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-card-body" id="slackBody">
+          <div class="settings-field">
+            <label class="settings-label">Webhook URL</label>
+            <input class="settings-input" id="slackWebhook" type="text" placeholder="https://hooks.slack.com/services/..." oninput="saveSettings()"/>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Channel</label>
+            <input class="settings-input" id="slackChannel" type="text" placeholder="#alerts" oninput="saveSettings()"/>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Notify on severity</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <label class="settings-check"><input type="checkbox" id="slackCritical" onchange="saveSettings()" checked> Critical</label>
+              <label class="settings-check"><input type="checkbox" id="slackWarning"  onchange="saveSettings()" checked> Warning</label>
+              <label class="settings-check"><input type="checkbox" id="slackInfo"     onchange="saveSettings()"> Info</label>
+            </div>
+          </div>
+          <button class="settings-test-btn" onclick="testSlack()">Test Connection</button>
+          <span class="settings-test-result" id="slackTestResult"></span>
+        </div>
+      </div>
+
+      <!-- EMAIL -->
+      <div class="settings-card">
+        <div class="settings-card-header">
+          <div class="settings-card-icon" style="background:#1a73e8">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <div>
+            <div class="settings-card-title">Email</div>
+            <div class="settings-card-sub">Send alert notifications via SMTP</div>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="emailEnabled" onchange="saveSettings()">
+            <span class="settings-toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-card-body" id="emailBody">
+          <div class="settings-row-2">
+            <div class="settings-field">
+              <label class="settings-label">SMTP Host</label>
+              <input class="settings-input" id="emailHost" type="text" placeholder="smtp.gmail.com" oninput="saveSettings()"/>
+            </div>
+            <div class="settings-field">
+              <label class="settings-label">Port</label>
+              <input class="settings-input" id="emailPort" type="number" placeholder="587" oninput="saveSettings()"/>
+            </div>
+          </div>
+          <div class="settings-row-2">
+            <div class="settings-field">
+              <label class="settings-label">Username</label>
+              <input class="settings-input" id="emailUser" type="text" placeholder="alerts@quest.com" oninput="saveSettings()"/>
+            </div>
+            <div class="settings-field">
+              <label class="settings-label">Password / App Token</label>
+              <input class="settings-input" id="emailPass" type="password" placeholder="••••••••" oninput="saveSettings()"/>
+            </div>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Recipients (comma separated)</label>
+            <input class="settings-input" id="emailTo" type="text" placeholder="ops@quest.com, oncall@quest.com" oninput="saveSettings()"/>
+          </div>
+          <button class="settings-test-btn" onclick="testEmail()">Test Connection</button>
+          <span class="settings-test-result" id="emailTestResult"></span>
+        </div>
+      </div>
+
+      <!-- PAGERDUTY -->
+      <div class="settings-card">
+        <div class="settings-card-header">
+          <div class="settings-card-icon" style="background:#06ac38">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.67 0H7.33C3.28 0 0 3.28 0 7.33v9.34C0 20.72 3.28 24 7.33 24h9.34C20.72 24 24 20.72 24 16.67V7.33C24 3.28 20.72 0 16.67 0zm-4.1 17.33H9.9v-2.67h2.67v2.67zm0-5.33H9.9V6.67h2.67V12z"/></svg>
+          </div>
+          <div>
+            <div class="settings-card-title">PagerDuty</div>
+            <div class="settings-card-sub">Create PagerDuty incidents for critical alerts</div>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="pdEnabled" onchange="saveSettings()">
+            <span class="settings-toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-card-body" id="pdBody">
+          <div class="settings-field">
+            <label class="settings-label">Integration Key (Events API v2)</label>
+            <input class="settings-input" id="pdKey" type="text" placeholder="a1b2c3d4e5f6..." oninput="saveSettings()"/>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Only trigger on severity</label>
+            <div style="display:flex;gap:8px">
+              <label class="settings-check"><input type="checkbox" id="pdCritical" onchange="saveSettings()" checked> Critical only</label>
+              <label class="settings-check"><input type="checkbox" id="pdWarning"  onchange="saveSettings()"> Warning</label>
+            </div>
+          </div>
+          <button class="settings-test-btn" onclick="testPagerDuty()">Test Connection</button>
+          <span class="settings-test-result" id="pdTestResult"></span>
+        </div>
+      </div>
+
+      <!-- WEBHOOK -->
+      <div class="settings-card">
+        <div class="settings-card-header">
+          <div class="settings-card-icon" style="background:#6366f1">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+          <div>
+            <div class="settings-card-title">Custom Webhook</div>
+            <div class="settings-card-sub">POST alert payload to any HTTP endpoint</div>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="webhookEnabled" onchange="saveSettings()">
+            <span class="settings-toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-card-body" id="webhookBody">
+          <div class="settings-field">
+            <label class="settings-label">Endpoint URL</label>
+            <input class="settings-input" id="webhookUrl" type="text" placeholder="https://your-service.com/hook" oninput="saveSettings()"/>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">Authorization Header (optional)</label>
+            <input class="settings-input" id="webhookAuth" type="text" placeholder="Bearer your-token" oninput="saveSettings()"/>
+          </div>
+          <button class="settings-test-btn" onclick="testWebhook()">Test Connection</button>
+          <span class="settings-test-result" id="webhookTestResult"></span>
+        </div>
+      </div>
+
+    </main>
+  </div><!-- /settingsView -->
 
   <script src="app.js"></script>
 </body>

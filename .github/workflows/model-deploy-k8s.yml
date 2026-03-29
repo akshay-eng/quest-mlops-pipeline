@@ -22,11 +22,25 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Check Milvus Vector DB Health
         run: |
+          # force_fail=true → simulate outage for WINGS demo without hitting the host
           if [ "${{ github.event.inputs.force_fail }}" = "true" ]; then
-            echo "::error title=Milvus Vector DB Unhealthy::Milvus not responding at 150.239.168.255:9091. Run WINGS agent to remediate."
+            echo "::error title=Milvus Vector DB Unhealthy::Milvus outage simulated. Run WINGS agent to remediate."
             exit 1
           fi
-          echo "Milvus Vector DB is healthy at 150.239.168.255:9091"
+
+          MILVUS_URL="http://150.239.168.255:9091/healthz"
+          echo "Checking Milvus health at ${MILVUS_URL} ..."
+
+          HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 --retry 3 --retry-delay 5 "${MILVUS_URL}" || echo "000")
+
+          echo "Milvus HTTP response: ${HTTP_CODE}"
+
+          if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "204" ]; then
+            echo "✅ Milvus is healthy (HTTP ${HTTP_CODE})"
+          else
+            echo "::warning title=Milvus Unreachable::Milvus returned HTTP ${HTTP_CODE} — continuing deployment (Milvus is optional for model serving)"
+            echo "Continuing without Milvus health gate..."
+          fi
 
       # -----------------------------------------------------------------------
       # STEP 2 — Checkout and set image tag
