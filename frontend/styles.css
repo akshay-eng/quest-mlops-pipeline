@@ -830,22 +830,22 @@ body {
 .resolve-meta-sep { color: var(--border-2); }
 .resolve-meta-item { display: flex; align-items: center; gap: 4px; }
 
-/* log area — dark terminal */
+/* log area — light theme */
 .resolve-log {
   flex: 1; overflow-y: auto;
-  background: #0d1117;
-  padding: 16px 20px;
+  background: var(--surface-2);
+  padding: 20px 24px;
   display: flex; flex-direction: column; gap: 3px;
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-family: 'Inter', -apple-system, sans-serif;
 }
 .log-placeholder {
-  font-size: 12px; color: #484f58; font-style: italic;
+  font-size: 12px; color: var(--text-muted); font-style: italic;
   padding: 6px 0;
 }
 
 .log-line {
   display: flex; align-items: flex-start; gap: 10px;
-  font-size: 12px; line-height: 1.7;
+  font-size: 13px; line-height: 1.7;
   animation: fadeInLog 0.18s ease;
 }
 @keyframes fadeInLog {
@@ -853,20 +853,20 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.log-time  { color: #484f58; flex-shrink: 0; min-width: 70px; }
+.log-time  { color: var(--text-light); flex-shrink: 0; min-width: 70px; }
 .log-icon  { flex-shrink: 0; width: 14px; text-align: center; font-size: 13px; }
-.log-msg   { color: #c9d1d9; flex: 1; }
+.log-msg   { color: var(--text); flex: 1; }
 
-.log-line.status-ok      .log-icon { color: #3fb950; }
-.log-line.status-ok      .log-msg  { color: #c9d1d9; }
-.log-line.status-error   .log-icon { color: #f85149; }
-.log-line.status-error   .log-msg  { color: #f85149; }
-.log-line.status-running .log-icon { color: #58a6ff; }
-.log-line.status-running .log-msg  { color: #8b949e; }
-.log-line.status-info    .log-icon { color: #484f58; }
-.log-line.status-info    .log-msg  { color: #8b949e; }
-.log-line.status-done    .log-icon { color: #3fb950; }
-.log-line.status-done    .log-msg  { color: #3fb950; font-weight: 700; letter-spacing: 0.2px; }
+.log-line.status-ok      .log-icon { color: var(--success); }
+.log-line.status-ok      .log-msg  { color: var(--text); }
+.log-line.status-error   .log-icon { color: var(--critical); }
+.log-line.status-error   .log-msg  { color: var(--critical); }
+.log-line.status-running .log-icon { color: var(--blue); }
+.log-line.status-running .log-msg  { color: var(--text-muted); }
+.log-line.status-info    .log-icon { color: var(--text-light); }
+.log-line.status-info    .log-msg  { color: var(--text-muted); }
+.log-line.status-done    .log-icon { color: var(--success); }
+.log-line.status-done    .log-msg  { color: var(--success); font-weight: 700; letter-spacing: 0.2px; }
 
 .log-spin { display: inline-block; animation: spin 1.2s linear infinite; }
 @keyframes spin {
@@ -878,8 +878,8 @@ body {
 .resolve-footer {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 20px;
-  border-top: 1px solid #30363d;
-  background: #161b22;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
   flex-shrink: 0;
 }
 .resolve-status-wrap { display: flex; align-items: center; gap: 8px; }
@@ -889,7 +889,30 @@ body {
 .resolve-status-dot.running { background: var(--blue);    animation: blink 1s infinite; }
 .resolve-status-dot.done    { background: var(--success); }
 .resolve-status-dot.error   { background: var(--critical); }
-.resolve-status-text { font-size: 12px; color: #8b949e; }
+.resolve-status-text { font-size: 12px; color: var(--text-muted); }
+
+/* Markdown inside resolve log */
+.log-msg code {
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+}
+.log-msg pre {
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 10px 12px; border-radius: 6px;
+  overflow-x: auto; margin-top: 8px;
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+  color: var(--text);
+}
+.log-msg strong { color: var(--accent); }
+.log-msg h1, .log-msg h2, .log-msg h3 { margin: 12px 0 6px; color: var(--text); }
+.log-msg h2 { font-size: 15px; }
+.log-msg h3 { font-size: 13px; }
+.log-msg ul, .log-msg ol { margin: 6px 0; padding-left: 20px; }
+.log-msg li { margin: 3px 0; }
+.log-msg table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+.log-msg th, .log-msg td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.log-msg th { background: var(--surface); font-weight: 600; }
 
 /* ===== WORKFLOW DETAIL MODAL ===== */
 .wf-detail-modal {
@@ -1082,7 +1105,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-light); }
-.resolve-log::-webkit-scrollbar-thumb { background: #30363d; }
+.resolve-log::-webkit-scrollbar-thumb { background: var(--border-2); }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1100px) {
