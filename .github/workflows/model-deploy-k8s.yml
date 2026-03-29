@@ -70,7 +70,7 @@ jobs:
           cd manifests
 
           # Bump image tag in deployment.yaml
-          sed -i "s|ak3hay/drug-test-classifier:.*|ak3hey/drug-test-classifier:${{ steps.tag.outputs.TAG }}|g" deployment.yaml
+          sed -i "s|ak3hay/drug-test-classifier:.*|ak3hay/drug-test-classifier:${{ steps.tag.outputs.TAG }}|g" deployment.yaml
 
           git add deployment.yaml
           git diff --staged --quiet || git commit -m "chore: deploy drug-test-classifier:${{ steps.tag.outputs.TAG }} [wings-bot]"
