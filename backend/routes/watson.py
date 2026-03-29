@@ -14,8 +14,8 @@ from fastapi.responses import StreamingResponse
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-IBM_API_KEY = os.environ.get("IBM_API_KEY", "7jzzR17TwFlvVlTn5_y_AuV_mrGYvyi8C0FKa-Sg3Iu3")
-INSTANCE_ID = os.environ.get("WXO_INSTANCE_ID", "df327b39-2104-4b00-a1c2-4746cdf1767e")
+IBM_API_KEY = os.environ.get("IBM_API_KEY", "")
+INSTANCE_ID = os.environ.get("WXO_INSTANCE_ID", "")
 BASE_URL    = f"https://api.us-south.watson-orchestrate.cloud.ibm.com/instances/{INSTANCE_ID}/v1"
 DEFAULT_AGENT_ID = "2747d3ab-754e-4d03-85c2-1a023019ec6e"
 
