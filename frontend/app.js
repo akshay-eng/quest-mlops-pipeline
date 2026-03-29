@@ -935,7 +935,8 @@ function closeResolveModal(e) {
   if (e.target === document.getElementById('resolveOverlay')) closeResolve();
 }
 
-const WORKFLOW_AGENT_ID = '355ebf69-dee3-45e7-aae3-4fe9e4b9a914';
+const WORKFLOW_AGENT_ID      = '355ebf69-dee3-45e7-aae3-4fe9e4b9a914';
+const MODEL_HEALTH_AGENT_ID  = '9e076c83-4883-4cfe-a33d-f25ac1424b21';
 
 async function startResolveStream(runId) {
   resolveAbort = new AbortController();
@@ -1529,27 +1530,65 @@ function openResolveForModel(dep) {
 async function startModelInvestigateStream(dep) {
   resolveAbort = new AbortController();
 
-  appendLogLine('info', `Model: ${dep.name}`);
-  appendLogLine('info', `Overall status: ${dep.overall_status}`);
+  // Build rich prompt from all monitor data
+  const monitors = dep.monitors || {};
+  const monitorLines = [];
 
-  // Stream from backend — uses same SSE infrastructure, sends model context
+  for (const [key, mon] of Object.entries(monitors)) {
+    if (!mon) continue;
+    monitorLines.push(`\n### ${mon.label || key} (${mon.alert_count || 0} alerts)`);
+    if (mon.monitored_feature) {
+      monitorLines.push(`Monitored feature: ${mon.monitored_feature}${mon.monitored_value ? ' = ' + mon.monitored_value : ''}`);
+    }
+    const metrics = mon.metrics || [];
+    for (const m of metrics) {
+      const violation = m.violation && m.violation > 0 ? ` | VIOLATION: ${m.violation}` : ' | no violation';
+      monitorLines.push(`  - ${m.name}: ${m.value ?? '—'}${violation}`);
+    }
+  }
+
+  const prompt =
+    `You are analysing a production ML model with active monitoring alerts in IBM Watson OpenScale.\n\n` +
+    `Model: ${dep.name || 'drug-test-classifier'}\n` +
+    `Deployment type: ${dep.deployment_type || 'online'}\n` +
+    `Problem type: ${dep.problem_type || 'binary'}\n` +
+    `Overall status: ${dep.overall_status || 'error'}\n` +
+    `Total alerts: ${dep.total_alerts || Object.values(monitors).reduce((s, m) => s + (m?.alert_count || 0), 0)}\n` +
+    (dep.tests ? `Tests run: ${dep.tests.run} | Passed: ${dep.tests.passed} | Failed: ${dep.tests.failed}\n` : '') +
+    `\n## Monitor Data\n` +
+    monitorLines.join('\n') +
+    `\n\nPlease provide:\n` +
+    `1. Executive summary of the model health\n` +
+    `2. Root cause analysis for each violated metric\n` +
+    `3. Business risk and regulatory implications\n` +
+    `4. Specific remediation steps (immediate, short-term, strategic)\n` +
+    `5. Retraining recommendations with data requirements`;
+
   try {
-    const res = await fetch(`${WF_API_BASE}/api/openscale/deployments/${dep.id}/investigate`, {
+    const res = await fetch(`${WF_API_BASE}/api/investigate`, {
       method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
       signal:  resolveAbort.signal,
-      headers: { 'Accept': 'text/event-stream', 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name: dep.name, monitors: dep.monitors, overall_status: dep.overall_status }),
+      body: JSON.stringify({
+        message:   prompt,
+        thread_id: null,
+        agent_id:  MODEL_HEALTH_AGENT_ID,
+      }),
     });
 
     if (!res.ok) {
-      // Demo simulation if endpoint not wired
-      await _simulateModelInvestigation(dep);
+      appendLogLine('error', `Backend error: HTTP ${res.status}`);
+      setResolveDone(false);
       return;
     }
 
     const reader  = res.body.getReader();
     const decoder = new TextDecoder();
     let   buffer  = '';
+    let   fullText = '';
+
+    appendLogLine('running', 'Agent is analysing...');
+    const logEl = document.getElementById('resolveLog').lastElementChild;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -1563,60 +1602,25 @@ async function startModelInvestigateStream(dep) {
         const raw = trimmed.slice(5).trim();
         if (!raw || raw === '[DONE]') continue;
         try {
-          const evt = JSON.parse(raw);
-          appendLogLine(evt.status || 'info', evt.message || '', evt.timestamp);
-          if (evt.status === 'done') { setResolveDone(true); return; }
+          const chunk = JSON.parse(raw);
+          if (chunk.text) {
+            fullText += chunk.text;
+            if (logEl) logEl.querySelector('.log-msg').innerHTML = renderMarkdown(fullText);
+            document.getElementById('resolveLog').scrollTop = document.getElementById('resolveLog').scrollHeight;
+          }
+          if (chunk.done) { setResolveDone(true); return; }
         } catch { /* ignore */ }
       }
     }
+
     setResolveDone(true);
   } catch (err) {
     if (err.name === 'AbortError') return;
-    // Fall back to demo simulation
-    await _simulateModelInvestigation(dep);
+    appendLogLine('error', `Stream error: ${err.message}`);
+    setResolveDone(false);
   }
 }
 
-async function _simulateModelInvestigation(dep) {
-  const delay = ms => new Promise(r => setTimeout(r, ms));
-  const monitors = dep.monitors || {};
-
-  appendLogLine('running', 'Connecting to IBM Watson X Orchestrate...');
-  await delay(1200);
-  appendLogLine('ok',      'Orchestrate agent initialised');
-  await delay(400);
-
-  appendLogLine('running', `Querying Watson OpenScale instance for ${escHtml(dep.name)}...`);
-  await delay(1000);
-
-  for (const [, mon] of Object.entries(monitors)) {
-    if (mon.state === 'error') {
-      appendLogLine('info', `Monitor issue detected: ${mon.label} — state: ${mon.state}`);
-    } else {
-      appendLogLine('ok', `${mon.label}: ${mon.state}`);
-    }
-    await delay(300);
-  }
-
-  appendLogLine('running', 'Sending alert context to IBM Granite for RCA...');
-  await delay(2000);
-  appendLogLine('ok',      `RCA complete — root cause: feedback logging table has no new labeled records`);
-  appendLogLine('info',    'Resolution: submit labeled payload data via OpenScale feedback API to re-enable quality monitoring');
-
-  await delay(500);
-  appendLogLine('running', 'Opening ServiceNow incident via Watson X Orchestrate...');
-  await delay(1200);
-  appendLogLine('ok',      'ServiceNow INC0042199 created — assigned to Quest MLOps Team');
-
-  await delay(400);
-  appendLogLine('running', 'Updating Watson OpenScale model fact sheet...');
-  await delay(800);
-  appendLogLine('ok',      'Governance fact sheet updated with incident reference');
-
-  await delay(300);
-  appendLogLine('done',    `Investigation complete · Model: ${dep.name} · Ticket: INC0042199 ✦`);
-  setResolveDone(true);
-}
 
 // =============================================================================
 // SHARED UTILS
