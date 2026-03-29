@@ -9,6 +9,7 @@ const WF_API_BASE      = 'http://localhost:8000';
 const POLL_INTERVAL    = 10000;
 const WF_POLL_INTERVAL = 15000;
 const OS_POLL_INTERVAL = 60000;   // OpenScale — poll every 60s (API is slower)
+const EV_POLL_INTERVAL = 90000;   // Evidently — poll every 90s
 
 let allAlerts      = [];
 let currentAlertId = null;
@@ -101,6 +102,8 @@ window.addEventListener('DOMContentLoaded', () => {
   setInterval(fetchWorkflows, WF_POLL_INTERVAL);
   fetchDeployments();
   setInterval(fetchDeployments, OS_POLL_INTERVAL);
+  fetchEvidently();
+  setInterval(fetchEvidently, EV_POLL_INTERVAL);
 });
 
 // ---------------------------------------------------------------------------
@@ -109,16 +112,19 @@ window.addEventListener('DOMContentLoaded', () => {
 function switchTab(tab) {
   activeTab = tab;
 
-  document.getElementById('tabIncidents').classList.toggle('active', tab === 'incidents');
-  document.getElementById('tabWorkflows').classList.toggle('active', tab === 'workflows');
-  document.getElementById('tabModels').classList.toggle('active',    tab === 'models');
+  document.getElementById('tabIncidents').classList.toggle('active',  tab === 'incidents');
+  document.getElementById('tabWorkflows').classList.toggle('active',  tab === 'workflows');
+  document.getElementById('tabModels').classList.toggle('active',     tab === 'models');
+  document.getElementById('tabEvidently').classList.toggle('active',  tab === 'evidently');
 
-  document.getElementById('incidentsView').style.display = tab === 'incidents' ? '' : 'none';
-  document.getElementById('workflowsView').style.display = tab === 'workflows' ? '' : 'none';
-  document.getElementById('modelsView').style.display    = tab === 'models'    ? '' : 'none';
+  document.getElementById('incidentsView').style.display  = tab === 'incidents'  ? '' : 'none';
+  document.getElementById('workflowsView').style.display  = tab === 'workflows'  ? '' : 'none';
+  document.getElementById('modelsView').style.display     = tab === 'models'     ? '' : 'none';
+  document.getElementById('evidentlyView').style.display  = tab === 'evidently'  ? '' : 'none';
 
   if (tab === 'workflows') fetchWorkflows();
   if (tab === 'models')    fetchDeployments();
+  if (tab === 'evidently') fetchEvidently();
 }
 
 // ---------------------------------------------------------------------------
@@ -1544,4 +1550,211 @@ function formatRelative(iso) {
   const h = Math.floor(m / 60);
   if (h < 24)  return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+// =============================================================================
+// EVIDENTLY AI TAB
+// =============================================================================
+
+let _evSnapshots = [];
+let _evLatest    = null;
+
+async function fetchEvidently() {
+  try {
+    // Fetch both endpoints in parallel
+    const [listRes, latestRes] = await Promise.all([
+      fetch(`${WF_API_BASE}/api/evidently/reports`),
+      fetch(`${WF_API_BASE}/api/evidently/latest`),
+    ]);
+
+    if (!listRes.ok || !latestRes.ok) throw new Error(`HTTP ${listRes.status}/${latestRes.status}`);
+
+    const listData   = await listRes.json();
+    const latestData = await latestRes.json();
+
+    _evSnapshots = listData.snapshots || [];
+    _evLatest    = latestData;
+
+    document.getElementById('evLoadingState').style.display = 'none';
+    document.getElementById('evErrorState').style.display   = 'none';
+    document.getElementById('evContent').style.display      = '';
+
+    _renderEvidentlyAll();
+
+    // Tab badge — show drifted feature count
+    const nDrifted = (_evLatest.drift || {}).n_drifted || 0;
+    const badge    = document.getElementById('tabEvidentlyBadge');
+    badge.textContent = nDrifted;
+    badge.className   = 'tab-badge' + (nDrifted > 0 ? ' tab-badge-red' : '');
+
+  } catch (err) {
+    console.warn('Evidently fetch failed:', err.message);
+    document.getElementById('evLoadingState').style.display = 'none';
+    document.getElementById('evContent').style.display      = 'none';
+    document.getElementById('evErrorState').style.display   = '';
+    document.getElementById('evErrorState').innerHTML = `
+      <div class="ev-error-inner">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <div>
+          <div style="font-weight:600;margin-bottom:4px">Cannot reach Evidently backend</div>
+          <div style="color:var(--text-muted);font-size:12px">${escHtml(err.message)} — ensure FastAPI is running with EVIDENTLY_API_KEY set</div>
+        </div>
+      </div>`;
+  }
+}
+
+function _renderEvidentlyAll() {
+  if (!_evLatest) return;
+  const drift   = _evLatest.drift          || {};
+  const cls     = _evLatest.classification || {};
+  const features= _evLatest.features       || [];
+
+  // ── Stats row ──────────────────────────────────────────────────────────────
+  document.getElementById('evStatReports').textContent  = _evSnapshots.length;
+  document.getElementById('evStatDrifted').textContent  =
+    drift.n_drifted != null ? `${drift.n_drifted}/${drift.n_total}` : '—';
+  document.getElementById('evStatF1').textContent       =
+    cls.f1 != null ? (cls.f1 * 100).toFixed(1) + '%' : '—';
+
+  const driftCard = document.getElementById('evStatDriftCard');
+  const driftEl   = document.getElementById('evStatDrift');
+  if (drift.dataset_drift === true) {
+    driftEl.textContent    = 'Drifted';
+    driftCard.className    = 'stat-card stat-critical';
+  } else if (drift.dataset_drift === false) {
+    driftEl.textContent    = 'Stable';
+    driftCard.className    = 'stat-card';
+  } else {
+    driftEl.textContent    = '—';
+    driftCard.className    = 'stat-card';
+  }
+
+  // ── Project ID strip ───────────────────────────────────────────────────────
+  document.getElementById('evProjectId').textContent =
+    'Project: ' + (_evLatest.metadata?.model || 'drug-test-classifier') +
+    '  ·  v' + (_evLatest.metadata?.version || '—');
+
+  // ── Report header ─────────────────────────────────────────────────────────
+  document.getElementById('evReportHeader').innerHTML = `
+    <div class="ev-report-meta">
+      <div class="ev-report-time">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        Latest report: <strong>${formatRelative(_evLatest.timestamp)}</strong>
+        <span class="ev-ts-full">${formatFull(_evLatest.timestamp)}</span>
+      </div>
+      ${_evLatest.tags && _evLatest.tags.length ? `
+      <div class="ev-tags">
+        ${_evLatest.tags.map(t => `<span class="ev-tag">${escHtml(t)}</span>`).join('')}
+      </div>` : ''}
+      <div class="ev-drift-pill ${drift.dataset_drift ? 'drifted' : 'stable'}">
+        ${drift.dataset_drift
+          ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Dataset drift detected`
+          : `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> No dataset drift`}
+      </div>
+    </div>`;
+
+  // ── Feature drift table ────────────────────────────────────────────────────
+  _renderDriftTable(features);
+
+  // ── Classification metrics ─────────────────────────────────────────────────
+  _renderClassMetrics(cls);
+
+  // ── Report history ─────────────────────────────────────────────────────────
+  _renderEvHistory(_evSnapshots);
+}
+
+function _renderDriftTable(features) {
+  const el = document.getElementById('evDriftTable');
+  if (!features.length) {
+    el.innerHTML = '<div class="ev-empty-msg">No feature drift data — upload a report first</div>';
+    return;
+  }
+
+  const rows = features.map(f => {
+    const score   = f.drift_score || 0;
+    const pct     = Math.min(Math.round(score * 100), 100);
+    const barCls  = f.drifted ? 'ev-bar-drifted' : 'ev-bar-ok';
+    const badgeCls= f.drifted ? 'badge-critical' : 'badge-success';
+    const label   = f.drifted ? 'Drifted' : 'Stable';
+    return `
+      <div class="ev-drift-row">
+        <div class="ev-feat-name" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+        <div class="ev-bar-wrap">
+          <div class="ev-bar ${barCls}" style="width:${pct}%"></div>
+        </div>
+        <div class="ev-score-val">${score.toFixed(3)}</div>
+        <span class="badge ${badgeCls}" style="font-size:10px;padding:2px 8px">${label}</span>
+        <span class="ev-test-name">${escHtml(f.stat_test || '')}</span>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="ev-drift-header">
+      <span>Feature</span><span>Drift Score</span><span></span><span>Status</span><span>Test</span>
+    </div>
+    ${rows}`;
+}
+
+function _renderClassMetrics(cls) {
+  const el = document.getElementById('evClassMetrics');
+  if (!cls || Object.keys(cls).length === 0) {
+    el.innerHTML = '<div class="ev-empty-msg">No classification metrics — add ground truth labels to your predictions</div>';
+    return;
+  }
+
+  const metrics = [
+    { label: 'Accuracy',  value: cls.accuracy,  color: '#10b981' },
+    { label: 'F1 Score',  value: cls.f1,        color: '#6366f1' },
+    { label: 'Precision', value: cls.precision,  color: '#f59e0b' },
+    { label: 'Recall',    value: cls.recall,     color: '#3b82f6' },
+  ];
+
+  el.innerHTML = `
+    <div class="ev-class-grid">
+      ${metrics.map(m => {
+        const pct = m.value != null ? Math.round(m.value * 100) : null;
+        const cls2= pct != null && pct < 60 ? 'ev-metric-low' : pct != null && pct < 80 ? 'ev-metric-mid' : 'ev-metric-high';
+        return `
+          <div class="ev-metric-card ${cls2}">
+            <div class="ev-metric-val" style="color:${m.color}">
+              ${pct != null ? pct + '%' : '—'}
+            </div>
+            <div class="ev-metric-label">${m.label}</div>
+            ${pct != null ? `
+            <div class="ev-metric-bar-wrap">
+              <div class="ev-metric-bar" style="width:${pct}%;background:${m.color}20;border-right:2px solid ${m.color}"></div>
+            </div>` : ''}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function _renderEvHistory(snapshots) {
+  const el = document.getElementById('evHistory');
+  if (!snapshots.length) {
+    el.innerHTML = '<div class="ev-empty-msg">No reports yet — trigger the GitHub Actions workflow to upload the first report</div>';
+    return;
+  }
+
+  el.innerHTML = snapshots.slice(0, 10).map((s, i) => {
+    const tags   = (s.tags || []).slice(0, 2);
+    const isLatest = i === 0;
+    return `
+      <div class="ev-history-row ${isLatest ? 'ev-history-latest' : ''}">
+        <div class="ev-hist-dot ${isLatest ? 'latest' : ''}"></div>
+        <div class="ev-hist-body">
+          <div class="ev-hist-time">${formatRelative(s.timestamp)}</div>
+          <div class="ev-hist-meta">
+            ${tags.map(t => `<span class="ev-tag">${escHtml(t)}</span>`).join('')}
+            ${s.metadata?.version ? `<span class="ev-tag">v${escHtml(s.metadata.version)}</span>` : ''}
+            ${isLatest ? '<span class="ev-tag ev-tag-latest">latest</span>' : ''}
+          </div>
+          <div class="ev-hist-id">${s.id.slice(0, 8)}…</div>
+        </div>
+      </div>`;
+  }).join('')}`;
 }

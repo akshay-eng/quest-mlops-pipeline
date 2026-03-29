@@ -57,6 +57,13 @@
         Model Monitoring
         <span class="tab-badge" id="tabModelsBadge">0</span>
       </button>
+      <button class="tab-btn" id="tabEvidently" onclick="switchTab('evidently')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        Evidently AI
+        <span class="tab-badge" id="tabEvidentlyBadge">0</span>
+      </button>
     </div>
   </nav>
 
@@ -449,6 +456,106 @@
 
     </div>
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       EVIDENTLY AI VIEW
+  ════════════════════════════════════════════════════════════ -->
+  <div id="evidentlyView" style="display:none">
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-value" id="evStatReports">—</div>
+        <div class="stat-label">Reports Uploaded</div>
+      </div>
+      <div class="stat-card" id="evStatDriftCard">
+        <div class="stat-value" id="evStatDrift">—</div>
+        <div class="stat-label">Drift Status</div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-value" id="evStatDrifted">—</div>
+        <div class="stat-label">Features Drifted</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="evStatF1">—</div>
+        <div class="stat-label">F1 Score</div>
+      </div>
+    </div>
+
+    <main class="main">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="ev-powered-by">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Evidently AI Cloud
+          </div>
+          <span class="ev-project-id" id="evProjectId"></span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-ghost" onclick="fetchEvidently()" style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Refresh
+          </button>
+          <a class="btn btn-ghost" href="https://app.evidently.cloud/projects/019d38af-88af-77a3-b6f0-ce8bb837307c" target="_blank" style="font-size:12px">
+            Open in Evidently ↗
+          </a>
+        </div>
+      </div>
+
+      <!-- LOADING / ERROR STATE -->
+      <div id="evLoadingState" class="ev-loading-state">
+        <div class="os-loading-spinner"></div>
+        <span>Connecting to Evidently Cloud...</span>
+      </div>
+      <div id="evErrorState" class="ev-error-state" style="display:none"></div>
+
+      <!-- MAIN CONTENT (hidden until data loads) -->
+      <div id="evContent" style="display:none">
+
+        <!-- Latest report header -->
+        <div class="ev-report-header" id="evReportHeader"></div>
+
+        <!-- Two-column layout: drift table + metrics -->
+        <div class="ev-layout">
+
+          <!-- LEFT: Feature Drift Table -->
+          <div class="ev-panel">
+            <div class="ev-panel-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              Data Drift — Feature Analysis
+            </div>
+            <div id="evDriftTable" class="ev-drift-table"></div>
+          </div>
+
+          <!-- RIGHT: Classification + History -->
+          <div class="ev-side">
+
+            <!-- Classification Quality -->
+            <div class="ev-panel">
+              <div class="ev-panel-title">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Classification Quality
+              </div>
+              <div id="evClassMetrics" class="ev-class-metrics"></div>
+            </div>
+
+            <!-- Report History -->
+            <div class="ev-panel">
+              <div class="ev-panel-title">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Report History
+              </div>
+              <div id="evHistory" class="ev-history"></div>
+            </div>
+
+          </div>
+        </div>
+      </div><!-- /evContent -->
+
+    </main>
+  </div><!-- /evidentlyView -->
 
   <script src="app.js"></script>
 </body>
