@@ -1,0 +1,92 @@
+name: Quest MLOps — K8s Deployment (GitOps)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_fail:
+        description: 'Simulate Milvus outage for WINGS demo (true = fail)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # STEP 1 — Milvus health gate
+      # Fails when force_fail=true → WINGS agent detects, fixes via AWX,
+      # retriggers this workflow → reruns with force_fail=false → passes
+      # -----------------------------------------------------------------------
+      - name: Check Milvus Vector DB Health
+        run: |
+          if [ "${{ github.event.inputs.force_fail }}" = "true" ]; then
+            echo "::error title=Milvus Vector DB Unhealthy::Milvus not responding at 150.239.168.255:9091. Run WINGS agent to remediate."
+            exit 1
+          fi
+          echo "Milvus Vector DB is healthy at 150.239.168.255:9091"
+
+      # -----------------------------------------------------------------------
+      # STEP 2 — Checkout and set image tag
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: tag
+        run: echo "TAG=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # STEP 3 — Build Docker image and push to Docker Hub
+      # Image: ak3hay/drug-test-classifier:<sha>
+      # Model is trained inside the Docker build (train_simple.py)
+      # -----------------------------------------------------------------------
+      - name: Build and push Docker image
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          docker build \
+            -t ak3hay/drug-test-classifier:${{ steps.tag.outputs.TAG }} \
+            -t ak3hay/drug-test-classifier:latest \
+            -f serving/Dockerfile .
+          docker push ak3hay/drug-test-classifier:${{ steps.tag.outputs.TAG }}
+          docker push ak3hay/drug-test-classifier:latest
+          echo "Pushed ak3hay/drug-test-classifier:${{ steps.tag.outputs.TAG }}"
+
+      # -----------------------------------------------------------------------
+      # STEP 4 — Update manifest repo (GitOps)
+      # Clones quest-mlops-pipeline-manifests, bumps image tag in deployment.yaml,
+      # commits and pushes → ArgoCD auto-syncs to K8s cluster
+      # -----------------------------------------------------------------------
+      - name: Update manifest repo with new image tag
+        env:
+          MANIFESTS_TOKEN: ${{ secrets.MANIFESTS_REPO_TOKEN }}
+        run: |
+          git config --global user.email "wings-bot@quest-diagnostics.com"
+          git config --global user.name "WINGS Bot"
+
+          git clone https://x-access-token:${MANIFESTS_TOKEN}@github.com/akshay-eng/quest-mlops-pipeline-manifests.git manifests
+          cd manifests
+
+          # Bump image tag in deployment.yaml
+          sed -i "s|ak3hay/drug-test-classifier:.*|ak3hey/drug-test-classifier:${{ steps.tag.outputs.TAG }}|g" deployment.yaml
+
+          git add deployment.yaml
+          git diff --staged --quiet || git commit -m "chore: deploy drug-test-classifier:${{ steps.tag.outputs.TAG }} [wings-bot]"
+          git push
+
+      # -----------------------------------------------------------------------
+      # STEP 5 — Job summary
+      # -----------------------------------------------------------------------
+      - name: Deployment Summary
+        run: |
+          echo "### ✅ GitOps Deployment Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`ak3hay/drug-test-classifier:${{ steps.tag.outputs.TAG }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Manifest Repo | [quest-mlops-pipeline-manifests](https://github.com/akshay-eng/quest-mlops-pipeline-manifests) |" >> $GITHUB_STEP_SUMMARY
+          echo "| ArgoCD | Syncing deployment to K8s cluster... |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring | Evidently AI CronJob active (every 30 min) |" >> $GITHUB_STEP_SUMMARY

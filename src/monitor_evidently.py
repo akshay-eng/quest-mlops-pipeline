@@ -1,77 +1,119 @@
 """
 Evidently AI Cloud — Model Monitoring Reporter
-Runs after deployment to register predictions and drift report in Evidently Cloud.
+Reads real predictions from LOG_PATH and uploads a DataDrift + Classification
+report to Evidently Cloud. Falls back to synthetic data if log is absent.
 
 Usage:
-  pip install evidently
-  EVIDENTLY_API_KEY=<token> EVIDENTLY_PROJECT_ID=<uuid> python monitor_evidently.py
+  pip install evidently pandas
+  EVIDENTLY_API_KEY=<token> python monitor_evidently.py
 
-GitHub Actions usage:
-  Set secrets: EVIDENTLY_API_KEY, EVIDENTLY_PROJECT_ID
+GitHub Actions / K8s CronJob:
+  Set env vars: EVIDENTLY_API_KEY, EVIDENTLY_PROJECT_ID, LOG_PATH
 """
 
 import os
 import json
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pandas as pd
 
 EVIDENTLY_API_KEY    = os.environ.get("EVIDENTLY_API_KEY", "")
-EVIDENTLY_PROJECT_ID = os.environ.get("EVIDENTLY_PROJECT_ID", "")
+EVIDENTLY_PROJECT_ID = os.environ.get("EVIDENTLY_PROJECT_ID", "019d38af-88af-77a3-b6f0-ce8bb837307c")
 EVIDENTLY_URL        = os.environ.get("EVIDENTLY_URL", "https://app.evidently.cloud")
+LOG_PATH             = os.environ.get("LOG_PATH", "/data/predictions.jsonl")
+REFERENCE_PATH       = os.environ.get("REFERENCE_PATH", "data/reference.jsonl")
 
 MODEL_NAME    = "drug-test-classifier"
 MODEL_VERSION = os.environ.get("GITHUB_SHA", "local")[:7]
 
+FEATURE_NAMES = ["age", "test_type_code", "collection_hour",
+                 "days_since_hire", "panel_size", "specimen_type"]
+
 
 # ---------------------------------------------------------------------------
-# Generate synthetic reference + current batch for demo
+# Load reference distribution (saved by train_simple.py at build time)
 # ---------------------------------------------------------------------------
 
-def _make_reference() -> pd.DataFrame:
-    """500-row reference distribution (clean, balanced)."""
+def _load_reference() -> pd.DataFrame:
+    if os.path.exists(REFERENCE_PATH):
+        records = []
+        with open(REFERENCE_PATH) as f:
+            for line in f:
+                try:
+                    records.append(json.loads(line.strip()))
+                except Exception:
+                    pass
+        if records:
+            print(f"[evidently] Loaded {len(records)} reference rows from {REFERENCE_PATH}")
+            return pd.DataFrame(records)
+
+    # Fallback: synthetic reference
+    print("[evidently] Reference file not found — using synthetic reference")
     random.seed(42)
     n = 500
-    return pd.DataFrame({
-        "age":             [random.gauss(42, 12) for _ in range(n)],
-        "lab_value_1":     [random.gauss(5.4, 1.1) for _ in range(n)],
-        "lab_value_2":     [random.gauss(120, 15) for _ in range(n)],
-        "lab_value_3":     [random.gauss(3.8, 0.6) for _ in range(n)],
-        "test_panel_code": [random.choice(["CBC", "BMP", "LFT", "UA"]) for _ in range(n)],
-        "target":          [random.choice([0, 1]) for _ in range(n)],
-        "prediction":      [random.choice([0, 1]) for _ in range(n)],
-        "prediction_proba": [random.uniform(0.3, 0.9) for _ in range(n)],
-    })
+    rows = []
+    for _ in range(n):
+        rows.append({
+            "age":             random.uniform(18, 65),
+            "test_type_code":  random.randint(1, 7),
+            "collection_hour": random.randint(6, 18),
+            "days_since_hire": random.uniform(30, 3650),
+            "panel_size":      random.randint(5, 20),
+            "specimen_type":   random.randint(0, 2),
+            "target":          random.randint(0, 1),
+            "prediction":      random.randint(0, 1),
+            "prediction_proba": random.uniform(0.3, 0.9),
+        })
+    return pd.DataFrame(rows)
 
 
-def _make_current() -> pd.DataFrame:
-    """200-row current batch — slight drift injected for demo interest."""
-    random.seed(int(datetime.now().timestamp()) % 9999)
+# ---------------------------------------------------------------------------
+# Load current batch from real prediction log (or synthetic fallback)
+# ---------------------------------------------------------------------------
+
+def _load_current() -> pd.DataFrame:
+    if os.path.exists(LOG_PATH):
+        records = []
+        with open(LOG_PATH) as f:
+            for line in f:
+                try:
+                    records.append(json.loads(line.strip()))
+                except Exception:
+                    pass
+        if records:
+            print(f"[evidently] Loaded {len(records)} live predictions from {LOG_PATH}")
+            df = pd.DataFrame(records)
+            # Rename prediction_proba to match column mapping if needed
+            return df
+
+    # Fallback: synthetic current with injected drift
+    print(f"[evidently] No prediction log found at {LOG_PATH} — using synthetic current batch")
+    random.seed(int(datetime.now(timezone.utc).timestamp()) % 9999)
     n = 200
-    # Inject distribution shift on lab_value_1 (mean +1.5)
-    return pd.DataFrame({
-        "age":             [random.gauss(44, 13) for _ in range(n)],
-        "lab_value_1":     [random.gauss(6.9, 1.3) for _ in range(n)],   # drifted
-        "lab_value_2":     [random.gauss(122, 16) for _ in range(n)],
-        "lab_value_3":     [random.gauss(3.7, 0.7) for _ in range(n)],
-        "test_panel_code": [random.choice(["CBC", "BMP", "LFT", "UA", "TPNL"]) for _ in range(n)],
-        "target":          [random.choice([0, 1]) for _ in range(n)],
-        "prediction":      [random.choice([0, 1]) for _ in range(n)],
-        "prediction_proba": [random.uniform(0.25, 0.95) for _ in range(n)],
-    })
+    rows = []
+    for _ in range(n):
+        rows.append({
+            "age":             random.uniform(18, 32),        # younger — drifted
+            "test_type_code":  random.randint(1, 7),
+            "collection_hour": random.randint(13, 18),        # later hours — drifted
+            "days_since_hire": random.uniform(30, 1000),      # newer employees — drifted
+            "panel_size":      random.randint(5, 20),
+            "specimen_type":   random.randint(0, 2),
+            "target":          random.randint(0, 1),
+            "prediction":      random.randint(0, 1),
+            "prediction_proba": random.uniform(0.25, 0.95),
+        })
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
-# Upload to Evidently Cloud
+# Upload report to Evidently Cloud
 # ---------------------------------------------------------------------------
 
-def upload_reports():
+def upload_report():
     if not EVIDENTLY_API_KEY:
-        print("[evidently] EVIDENTLY_API_KEY not set — skipping cloud upload.")
-        return False
-    if not EVIDENTLY_PROJECT_ID:
-        print("[evidently] EVIDENTLY_PROJECT_ID not set — skipping cloud upload.")
+        print("[evidently] EVIDENTLY_API_KEY not set — skipping upload.")
         return False
 
     try:
@@ -83,14 +125,19 @@ def upload_reports():
         print("[evidently] Package not installed — run: pip install evidently")
         return False
 
-    reference = _make_reference()
-    current   = _make_current()
+    reference = _load_reference()
+    current   = _load_current()
+
+    # Ensure common columns
+    common_cols = FEATURE_NAMES + ["target", "prediction", "prediction_proba"]
+    reference = reference[[c for c in common_cols if c in reference.columns]]
+    current   = current[[c for c in common_cols if c in current.columns]]
 
     column_mapping = ColumnMapping(
         target="target",
         prediction="prediction",
-        numerical_features=["age", "lab_value_1", "lab_value_2", "lab_value_3"],
-        categorical_features=["test_panel_code"],
+        numerical_features=["age", "collection_hour", "days_since_hire", "panel_size"],
+        categorical_features=["test_type_code", "specimen_type"],
     )
 
     report = Report(
@@ -101,26 +148,28 @@ def upload_reports():
         metadata={
             "model":   MODEL_NAME,
             "version": MODEL_VERSION,
-            "env":     "production",
         },
-        tags=[MODEL_NAME, "quest-diagnostics", "drug-test"],
+        tags=[MODEL_NAME, "quest-diagnostics", "k8s"],
     )
-    report.run(reference_data=reference, current_data=current, column_mapping=column_mapping)
+    report.run(
+        reference_data=reference,
+        current_data=current,
+        column_mapping=column_mapping,
+    )
 
     print(f"[evidently] Connecting to {EVIDENTLY_URL} ...")
     ws = CloudWorkspace(token=EVIDENTLY_API_KEY, url=EVIDENTLY_URL)
 
-    print(f"[evidently] Uploading report to project {EVIDENTLY_PROJECT_ID} ...")
+    print(f"[evidently] Uploading to project {EVIDENTLY_PROJECT_ID} ...")
     ws.add_report(EVIDENTLY_PROJECT_ID, report)
 
-    print(f"[evidently] ✅ Report uploaded — view at {EVIDENTLY_URL}/projects/{EVIDENTLY_PROJECT_ID}")
+    print(f"[evidently] Report uploaded → {EVIDENTLY_URL}/projects/{EVIDENTLY_PROJECT_ID}")
     return True
 
 
 if __name__ == "__main__":
     print(f"[evidently] Model: {MODEL_NAME}  Version: {MODEL_VERSION}")
-    success = upload_reports()
+    success = upload_report()
     if not success:
-        # Exit 0 so GitHub Actions step is non-blocking for missing credentials
-        print("[evidently] Monitoring step skipped (credentials not configured).")
+        print("[evidently] Monitoring step skipped.")
     exit(0)
