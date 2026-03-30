@@ -38,8 +38,8 @@ jobs:
           if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "204" ]; then
             echo "✅ Milvus is healthy (HTTP ${HTTP_CODE})"
           else
-            echo "::warning title=Milvus Unreachable::Milvus returned HTTP ${HTTP_CODE} — continuing deployment (Milvus is optional for model serving)"
-            echo "Continuing without Milvus health gate..."
+            echo "::error title=Milvus Vector DB Unhealthy::Milvus not responding at 150.239.168.255:9091 (HTTP ${HTTP_CODE}). Run WINGS agent to remediate."
+            exit 1
           fi
 
       # -----------------------------------------------------------------------
